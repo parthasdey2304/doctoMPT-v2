@@ -18,3 +18,99 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
 }
+
+/* ==========================================================================
+   Global Sleek Custom Scrollbars
+   Replaces stark browser default scrollbars across all routes and containers
+   ========================================================================== */
+
+/* Standard CSS Scrollbars (Firefox, Chrome 121+, modern standards) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+html.dark,
+html.dark *,
+.dark,
+.dark * {
+  scrollbar-color: rgba(113, 113, 122, 0.55) transparent;
+}
+
+/* WebKit-based browsers (Chrome, Edge, Safari, Opera) */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: #64748b;
+}
+
+/* Completely eliminate native scrollbar arrow buttons */
+::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Dark mode custom scrollbars */
+html.dark ::-webkit-scrollbar-thumb,
+html.dark::-webkit-scrollbar-thumb,
+.dark ::-webkit-scrollbar-thumb,
+.dark::-webkit-scrollbar-thumb {
+  background-color: #3f3f46;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover,
+html.dark::-webkit-scrollbar-thumb:hover,
+.dark ::-webkit-scrollbar-thumb:hover,
+.dark::-webkit-scrollbar-thumb:hover {
+  background-color: #71717a;
+}
+
+html.dark ::-webkit-scrollbar-thumb:active,
+html.dark::-webkit-scrollbar-thumb:active,
+.dark ::-webkit-scrollbar-thumb:active,
+.dark::-webkit-scrollbar-thumb:active {
+  background-color: #14b8a6;
+}
+
+html.dark ::-webkit-scrollbar-track,
+html.dark::-webkit-scrollbar-track,
+.dark ::-webkit-scrollbar-track,
+.dark::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Utility classes */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
