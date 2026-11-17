@@ -51,6 +51,7 @@ import {
 export default function Home() {
   // Theme state: defaults to 'light' (clean white medical UI)
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [mounted, setMounted] = useState(false);
 
   // Hamburger drawer / side panel state
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
@@ -125,9 +126,10 @@ export default function Home() {
 
   // Theme synchronization on mount and toggle
   useEffect(() => {
+    setMounted(true);
     try {
       const savedTheme = localStorage.getItem('doctompt_theme') as 'light' | 'dark' | null;
-      if (savedTheme === 'dark') {
+      if (savedTheme === 'dark' || document.documentElement.classList.contains('dark')) {
         setTheme('dark');
         document.documentElement.classList.add('dark');
       } else {
@@ -547,19 +549,20 @@ export default function Home() {
             <button
               type="button"
               onClick={toggleTheme}
+              suppressHydrationWarning
               className="p-2 sm:px-2.5 sm:py-2 rounded-xl border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-slate-700 dark:text-neutral-200 hover:bg-slate-100 dark:hover:bg-neutral-800 transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
-              title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+              title={mounted && theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
               aria-label="Toggle light and dark mode"
             >
-              {theme === 'light' ? (
-                <>
-                  <Moon className="w-4 h-4 text-slate-700 hover:text-teal-600 transition-colors" />
-                  <span className="text-xs font-medium text-slate-700 hidden lg:inline">Dark</span>
-                </>
-              ) : (
+              {mounted && theme === 'dark' ? (
                 <>
                   <Sun className="w-4 h-4 text-amber-400 hover:text-amber-300 transition-colors" />
                   <span className="text-xs font-medium text-neutral-200 hidden lg:inline">Light</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="w-4 h-4 text-slate-700 hover:text-teal-600 transition-colors" />
+                  <span className="text-xs font-medium text-slate-700 hidden lg:inline">Dark</span>
                 </>
               )}
             </button>

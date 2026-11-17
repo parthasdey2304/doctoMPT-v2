@@ -4,13 +4,20 @@
 @variant dark (&:where(.dark, .dark *));
 
 :root {
+  color-scheme: light;
   --background: #f8fafc;
   --foreground: #0f172a;
+  --scrollbar-thumb: rgba(148, 163, 184, 0.45);
+  --scrollbar-track: transparent;
 }
 
+html.dark,
 .dark {
+  color-scheme: dark;
   --background: #09090b;
   --foreground: #f4f4f5;
+  --scrollbar-thumb: rgba(113, 113, 122, 0.55);
+  --scrollbar-track: transparent;
 }
 
 body {
@@ -27,14 +34,7 @@ body {
 /* Standard CSS Scrollbars (Firefox, Chrome 121+, modern standards) */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
-}
-
-html.dark,
-html.dark *,
-.dark,
-.dark * {
-  scrollbar-color: rgba(113, 113, 122, 0.55) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 /* WebKit-based browsers (Chrome, Edge, Safari, Opera) */
