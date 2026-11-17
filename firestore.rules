@@ -1,0 +1,80 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// This security rules file governs the NoSQL storage for the
+// AI Medical Consultation & Prescription prototype.
+//
+// Collection: consultations
+// Document ID: {consultationId}
+// Fields:
+//   - id: string (required) - unique consultation ID
+//   - createdAt: timestamp (required, immutable) - server timestamp of consultation
+//   - patientName: string (required, 1-100 chars) - patient full name
+//   - patientAge: string (optional, 1-30 chars) - patient age
+//   - transcript: list of maps (required, max 200 items) - captured turns
+//       * role: string ('patient' | 'doctor')
+//       * text: string (1-2000 chars)
+//       * timestamp: string (ISO date string)
+//   - prescription: map (optional) - generated prescription
+//       * patientName: string
+//       * patientAge: string
+//       * date: string
+//       * chiefComplaint: string
+//       * assessmentNotes: string
+//       * medications: list of maps
+//       * advice: list of strings
+//       * followUp: string
+//   - doctorVoice: string (optional) - voice model used
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for validation
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidTranscriptItem(item) {
+      return item is map
+        && item.role in ['patient', 'doctor']
+        && item.text is string
+        && item.text.size() > 0
+        && item.text.size() <= 2000;
+    }
+
+    function isValidConsultation(data) {
+      return data.keys().hasAll(['id', 'createdAt', 'patientName', 'transcript'])
+        && data.id is string
+        && (data.createdAt is timestamp || (data.createdAt is string && data.createdAt.size() > 0))
+        && data.patientName is string
+        && data.patientName.size() >= 1
+        && data.patientName.size() <= 100
+        && data.transcript is list
+        && data.transcript.size() >= 1
+        && data.transcript.size() <= 200;
+    }
+
+    match /consultations/{consultationId} {
+      // Prototype demo rules: Allow read and create with data validation
+      allow read: if true;
+      allow create: if isValidConsultation(request.resource.data);
+      allow update: if isValidConsultation(request.resource.data)
+                    && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAuthenticated();
+    }
+
+    // Default deny for all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
