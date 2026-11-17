@@ -268,4 +268,40 @@ describe('Prescription PDF Generator', () => {
     expect(pdfOutput).not.toContain('Dr. Gemini');
     expect(pdfOutput).not.toContain('Strictly Educational');
   });
+
+  test('renders exact referenceCode in PDF output when provided (e.g. RX-MWL3FWAQ)', () => {
+    const rxWithRef: PrescriptionData = {
+      patientName: 'Khushi Kumari',
+      patientAge: '21 years',
+      date: '2026-11-17',
+      chiefComplaint: 'Elevated body temperature / fever, Sore throat and respiratory irritation',
+      assessmentNotes: 'Patient presented with acute symptoms consistent with mild viral/upper respiratory syndrome.',
+      referenceCode: 'RX-MWL3FWAQ',
+      doctorName: 'Dr. DoctoMPT',
+      clinicName: 'DOCTOMPT MEDICAL CLINIC',
+      medications: [
+        {
+          name: 'Dolo 650',
+          brandName: 'Dolo 650',
+          genericName: 'Paracetamol',
+          dosage: '650mg',
+          frequency: '3 times a day',
+          timing: 'After meals',
+          duration: '3 to 5 days',
+          reason: 'Reducing fever and pain relief',
+          instructions: 'Take with full glass of water',
+        },
+      ],
+      advice: ['Ensure 8 to 10 hours bed rest', 'Stay hydrated'],
+      followUp: 'Seek medical care if fever exceeds 102F',
+    };
+
+    const result = generatePrescriptionPdf(rxWithRef, false);
+    expect(result).toBeDefined();
+
+    const pdfOutput = result.doc.output();
+    expect(pdfOutput).toContain('RX-MWL3FWAQ');
+    expect(pdfOutput).toContain('Ref: RX-MWL3FWAQ');
+    expect(pdfOutput).not.toContain('Ref: Ref:');
+  });
 });

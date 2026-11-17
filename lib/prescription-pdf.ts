@@ -374,8 +374,13 @@ export function generatePrescriptionPdf(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6.5);
   doc.setTextColor(148, 163, 184);
+  const displayRef = prescription.referenceCode
+    ? (prescription.referenceCode.startsWith('Ref:')
+        ? prescription.referenceCode
+        : `Ref: ${prescription.referenceCode}`)
+    : `Ref: RX-${Date.now().toString(36).toUpperCase()}`;
   doc.text(
-    `Ref: RX-${Date.now().toString(36).toUpperCase()}`,
+    displayRef,
     sigX + 2,
     y + 17
   );

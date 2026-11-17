@@ -1184,9 +1184,17 @@ export default function Home() {
 
             {/* Success Message for DB Save */}
             {savedSuccessMessage && (
-              <div className="mt-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2 shadow-xs">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                <span>{savedSuccessMessage}</span>
+              <div className="mt-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs flex items-center justify-between gap-2 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span>{savedSuccessMessage}</span>
+                </div>
+                <Link
+                  href="/records"
+                  className="shrink-0 text-emerald-700 dark:text-emerald-300 font-bold hover:underline"
+                >
+                  View Records &rarr;
+                </Link>
               </div>
             )}
 

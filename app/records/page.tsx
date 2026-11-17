@@ -39,13 +39,24 @@ import {
   filterConsultations,
   getConsultationStats,
   formatConsultationDate,
+  resolveSelectedConsultation,
   triggerPrescriptionDownload,
   RecordsFilterMode,
 } from '@/lib/records-utils';
 
 export default function RecordsPage() {
   // Theme state: light | dark (persisted via localStorage doctompt_theme)
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('doctompt_theme');
+        if (saved === 'dark' || document.documentElement.classList.contains('dark')) {
+          return 'dark';
+        }
+      } catch {}
+    }
+    return 'light';
+  });
 
   // Hamburger drawer state
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -81,7 +92,7 @@ export default function RecordsPage() {
   // Copied reference code state
   const [copiedRef, setCopiedRef] = useState<string | null>(null);
 
-  // Synchronize theme on mount
+  // Synchronize theme on mount and across browser tabs
   useEffect(() => {
     try {
       const savedTheme = localStorage.getItem('doctompt_theme') as 'light' | 'dark' | null;
@@ -96,6 +107,21 @@ export default function RecordsPage() {
       setTheme('light');
       document.documentElement.classList.remove('dark');
     }
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'doctompt_theme') {
+        const next = e.newValue === 'dark' ? 'dark' : 'light';
+        setTheme(next);
+        if (next === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   const toggleTheme = () => {
@@ -155,11 +181,10 @@ export default function RecordsPage() {
     return getConsultationStats(records);
   }, [records]);
 
-  // Currently selected record for desktop detail view
+  // Currently selected record for desktop detail view (synchronized with filtered results)
   const selectedRecord = useMemo(() => {
-    if (!selectedId) return filteredRecords[0] || null;
-    return records.find((r) => r.id === selectedId) || filteredRecords[0] || null;
-  }, [selectedId, records, filteredRecords]);
+    return resolveSelectedConsultation(filteredRecords, selectedId);
+  }, [filteredRecords, selectedId]);
 
   // Toggle mobile accordion item
   const toggleMobileAccordion = (id: string) => {
@@ -174,10 +199,16 @@ export default function RecordsPage() {
     });
   };
 
-  // Handle PDF Download
-  const handleDownloadPdf = (prescription?: PrescriptionData) => {
+  // Handle PDF Download with reference code propagation
+  const handleDownloadPdf = (prescription?: PrescriptionData, fallbackRecordId?: string) => {
     if (!prescription) return;
-    const result = triggerPrescriptionDownload(prescription, true);
+    const resolvedPrescription: PrescriptionData = {
+      ...prescription,
+      referenceCode:
+        prescription.referenceCode ||
+        (fallbackRecordId ? `RX-${fallbackRecordId.substring(0, 8).toUpperCase()}` : 'RX-VERIFIED'),
+    };
+    const result = triggerPrescriptionDownload(resolvedPrescription, true);
     if (result.success) {
       setDownloadToast({
         message: `Prescription PDF (${result.fileName}) downloaded successfully!`,
@@ -419,6 +450,31 @@ export default function RecordsPage() {
             </p>
           </div>
 
+          {/* Appearance / Theme Mode */}
+          <div className="space-y-2">
+            <label className="text-[11px] font-bold tracking-wider uppercase text-slate-500 dark:text-neutral-400 block">
+              Appearance
+            </label>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-slate-50 dark:hover:bg-neutral-800 text-slate-800 dark:text-neutral-200 font-semibold flex items-center justify-between cursor-pointer shadow-xs"
+              aria-label="Toggle theme in navigation drawer"
+            >
+              <div className="flex items-center gap-2">
+                {theme === 'light' ? (
+                  <Moon className="w-4 h-4 text-slate-700" />
+                ) : (
+                  <Sun className="w-4 h-4 text-amber-400" />
+                )}
+                <span>Theme Mode</span>
+              </div>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-neutral-300">
+                {theme === 'light' ? 'Light Mode' : 'Dark Mode'}
+              </span>
+            </button>
+          </div>
+
           {/* Architecture Badge */}
           <div className="p-3 rounded-xl bg-slate-100 dark:bg-neutral-900/60 border border-slate-200 dark:border-neutral-800 text-[11px] text-slate-500 dark:text-neutral-400 space-y-1">
             <div className="flex justify-between">
@@ -656,8 +712,17 @@ export default function RecordsPage() {
                     return (
                       <div
                         key={item.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={isSelected}
                         onClick={() => setSelectedId(item.id)}
-                        className={`p-4 rounded-xl border text-xs cursor-pointer transition-all shadow-xs flex flex-col gap-2.5 ${
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSelectedId(item.id);
+                          }
+                        }}
+                        className={`p-4 rounded-xl border text-xs cursor-pointer transition-all shadow-xs flex flex-col gap-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500/50 ${
                           isSelected
                             ? 'bg-teal-50/50 dark:bg-teal-950/30 border-teal-500 dark:border-teal-500/80 ring-2 ring-teal-500/20'
                             : 'bg-white dark:bg-neutral-900 border-slate-200 dark:border-neutral-800 hover:border-slate-300 dark:hover:border-neutral-700 hover:bg-slate-50/50 dark:hover:bg-neutral-800/50'
@@ -768,7 +833,7 @@ export default function RecordsPage() {
                           {selectedRecord.prescription && (
                             <button
                               type="button"
-                              onClick={() => handleDownloadPdf(selectedRecord.prescription)}
+                              onClick={() => handleDownloadPdf(selectedRecord.prescription, selectedRecord.id)}
                               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-teal-600 hover:bg-teal-700 text-white transition-colors shadow-xs cursor-pointer"
                               title="Download Prescription PDF"
                             >
@@ -1083,41 +1148,49 @@ export default function RecordsPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-neutral-800/80">
-                              {selectedRecord.prescription.medications?.map((rawMed, idx) => {
-                                const med = normalizeMedication(rawMed);
-                                return (
-                                  <tr key={idx} className="hover:bg-slate-50/60 dark:hover:bg-neutral-900/40">
-                                    <td className="p-2.5">
-                                      <span className="font-bold text-slate-900 dark:text-white block">
-                                        {med.brandName || med.name}
-                                      </span>
-                                      {med.genericName && (
-                                        <span className="text-[11px] text-teal-700 dark:text-teal-400 block font-medium">
-                                          {med.genericName}
+                              {selectedRecord.prescription.medications && selectedRecord.prescription.medications.length > 0 ? (
+                                selectedRecord.prescription.medications.map((rawMed, idx) => {
+                                  const med = normalizeMedication(rawMed);
+                                  return (
+                                    <tr key={idx} className="hover:bg-slate-50/60 dark:hover:bg-neutral-900/40">
+                                      <td className="p-2.5">
+                                        <span className="font-bold text-slate-900 dark:text-white block">
+                                          {med.brandName || med.name}
                                         </span>
-                                      )}
-                                      <span className="text-[10px] text-slate-500 dark:text-neutral-400 block font-mono">
-                                        Strength: {med.dosage}
-                                      </span>
-                                    </td>
-                                    <td className="p-2.5 text-slate-700 dark:text-neutral-300 font-medium">
-                                      {med.frequency}
-                                    </td>
-                                    <td className="p-2.5 text-slate-700 dark:text-neutral-300">
-                                      {med.timing}
-                                    </td>
-                                    <td className="p-2.5 text-slate-600 dark:text-neutral-400">
-                                      {med.duration}
-                                    </td>
-                                    <td className="p-2.5 text-slate-700 dark:text-neutral-300">
-                                      {med.reason}
-                                    </td>
-                                    <td className="p-2.5 text-slate-600 dark:text-neutral-400 text-[11px]">
-                                      {med.instructions || 'As advised'}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
+                                        {med.genericName && (
+                                          <span className="text-[11px] text-teal-700 dark:text-teal-400 block font-medium">
+                                            {med.genericName}
+                                          </span>
+                                        )}
+                                        <span className="text-[10px] text-slate-500 dark:text-neutral-400 block font-mono">
+                                          Strength: {med.dosage}
+                                        </span>
+                                      </td>
+                                      <td className="p-2.5 text-slate-700 dark:text-neutral-300 font-medium">
+                                        {med.frequency}
+                                      </td>
+                                      <td className="p-2.5 text-slate-700 dark:text-neutral-300">
+                                        {med.timing}
+                                      </td>
+                                      <td className="p-2.5 text-slate-600 dark:text-neutral-400">
+                                        {med.duration}
+                                      </td>
+                                      <td className="p-2.5 text-slate-700 dark:text-neutral-300">
+                                        {med.reason}
+                                      </td>
+                                      <td className="p-2.5 text-slate-600 dark:text-neutral-400 text-[11px]">
+                                        {med.instructions || 'As advised'}
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              ) : (
+                                <tr>
+                                  <td colSpan={6} className="p-4 text-center text-slate-500 dark:text-neutral-400 italic">
+                                    No oral or parenteral medications prescribed. Follow supportive care and recovery guidance below.
+                                  </td>
+                                </tr>
+                              )}
                             </tbody>
                           </table>
                         </div>
@@ -1177,7 +1250,7 @@ export default function RecordsPage() {
                         <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-neutral-800">
                           <button
                             type="button"
-                            onClick={() => handleDownloadPdf(selectedRecord.prescription)}
+                            onClick={() => handleDownloadPdf(selectedRecord.prescription, selectedRecord.id)}
                             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-teal-600 hover:bg-teal-700 text-white transition-colors shadow-xs cursor-pointer"
                           >
                             <Download className="w-4 h-4" />
@@ -1226,6 +1299,7 @@ export default function RecordsPage() {
                     {/* Collapsible Card Header */}
                     <button
                       type="button"
+                      aria-expanded={isExpanded}
                       onClick={() => toggleMobileAccordion(item.id)}
                       className="w-full p-4 text-left flex items-start justify-between gap-3 cursor-pointer hover:bg-slate-50/50 dark:hover:bg-neutral-800/40 transition-colors"
                     >
@@ -1366,7 +1440,7 @@ export default function RecordsPage() {
                         )}
 
                         {/* Structured Prescription section on Mobile */}
-                        {item.prescription && (
+                        {item.prescription ? (
                           <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-neutral-800">
                             <div className="flex items-center justify-between">
                               <span className="font-bold text-xs uppercase tracking-wide text-slate-800 dark:text-neutral-200 flex items-center gap-1.5">
@@ -1375,7 +1449,7 @@ export default function RecordsPage() {
                               </span>
                               <button
                                 type="button"
-                                onClick={() => handleDownloadPdf(item.prescription)}
+                                onClick={() => handleDownloadPdf(item.prescription, item.id)}
                                 className="flex items-center gap-1 text-[11px] font-semibold text-teal-600 dark:text-teal-400 hover:underline cursor-pointer"
                               >
                                 <Download className="w-3 h-3" />
@@ -1383,43 +1457,87 @@ export default function RecordsPage() {
                               </button>
                             </div>
 
+                            {/* Mobile Clinical Assessment Notes if available */}
+                            {item.prescription.assessmentNotes && (
+                              <div className="p-3 rounded-xl bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 text-[11px]">
+                                <span className="font-bold text-slate-500 dark:text-neutral-400 block mb-0.5 uppercase text-[10px]">
+                                  Prescription Assessment Notes
+                                </span>
+                                <p className="text-slate-700 dark:text-neutral-300">
+                                  {item.prescription.assessmentNotes}
+                                </p>
+                              </div>
+                            )}
+
                             {/* Mobile Medications Cards */}
                             <div className="space-y-2">
-                              {item.prescription.medications?.map((rawMed, idx) => {
-                                const med = normalizeMedication(rawMed);
-                                return (
-                                  <div
-                                    key={idx}
-                                    className="p-3 rounded-xl bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 text-[11px] space-y-1"
-                                  >
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-bold text-slate-900 dark:text-white">
-                                        {med.brandName || med.name}
-                                      </span>
-                                      <span className="font-mono text-teal-600 dark:text-teal-400 text-[10px]">
-                                        {med.dosage}
-                                      </span>
+                              {item.prescription.medications && item.prescription.medications.length > 0 ? (
+                                item.prescription.medications.map((rawMed, idx) => {
+                                  const med = normalizeMedication(rawMed);
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className="p-3 rounded-xl bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 text-[11px] space-y-1"
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-bold text-slate-900 dark:text-white">
+                                          {med.brandName || med.name}
+                                        </span>
+                                        <span className="font-mono text-teal-600 dark:text-teal-400 text-[10px]">
+                                          {med.dosage}
+                                        </span>
+                                      </div>
+                                      {med.genericName && (
+                                        <span className="text-slate-500 dark:text-neutral-400 block text-[10px]">
+                                          Generic: {med.genericName}
+                                        </span>
+                                      )}
+                                      <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-600 dark:text-neutral-400 pt-1 border-t border-slate-100 dark:border-neutral-900">
+                                        <span>Freq: {med.frequency}</span>
+                                        <span>Time: {med.timing}</span>
+                                        <span>Duration: {med.duration}</span>
+                                        <span>Reason: {med.reason}</span>
+                                      </div>
                                     </div>
-                                    {med.genericName && (
-                                      <span className="text-slate-500 dark:text-neutral-400 block text-[10px]">
-                                        Generic: {med.genericName}
-                                      </span>
-                                    )}
-                                    <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-600 dark:text-neutral-400 pt-1 border-t border-slate-100 dark:border-neutral-900">
-                                      <span>Freq: {med.frequency}</span>
-                                      <span>Time: {med.timing}</span>
-                                      <span>Duration: {med.duration}</span>
-                                      <span>Reason: {med.reason}</span>
-                                    </div>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                })
+                              ) : (
+                                <div className="p-3 rounded-xl bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 text-center text-slate-500 dark:text-neutral-400 italic text-[11px]">
+                                  No oral medications prescribed. Follow supportive care advice below.
+                                </div>
+                              )}
                             </div>
+
+                            {/* Supportive Care Guidance on Mobile */}
+                            {Array.isArray(item.prescription.advice) && item.prescription.advice.length > 0 && (
+                              <div className="p-3 rounded-xl bg-teal-50/70 dark:bg-teal-950/20 border border-teal-200/80 dark:border-teal-800/30 text-[11px]">
+                                <span className="font-bold text-teal-800 dark:text-teal-300 block mb-1 uppercase text-[10px] tracking-wider">
+                                  Supportive Care & Recovery Guidance
+                                </span>
+                                <ul className="list-disc list-inside space-y-0.5 text-slate-700 dark:text-neutral-300">
+                                  {item.prescription.advice.map((adv, aIdx) => (
+                                    <li key={aIdx}>{adv}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {/* Follow-up on Mobile */}
+                            {item.prescription.followUp && (
+                              <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-800/30 text-[11px]">
+                                <span className="font-bold text-amber-800 dark:text-amber-300 block mb-0.5 uppercase text-[10px] tracking-wider">
+                                  Follow-Up & Clinical Safety Instructions
+                                </span>
+                                <p className="text-slate-700 dark:text-neutral-300">
+                                  {item.prescription.followUp}
+                                </p>
+                              </div>
+                            )}
 
                             {/* Digital Signature on Mobile */}
                             <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-neutral-800/80">
                               <span className="text-[10px] font-mono text-slate-400">
-                                {item.prescription.referenceCode || 'RX-VERIFIED'}
+                                {item.prescription.referenceCode || `RX-${item.id.substring(0, 8).toUpperCase()}`}
                               </span>
                               <div className="text-right">
                                 <div
@@ -1428,8 +1546,9 @@ export default function RecordsPage() {
                                 >
                                   Dr. DoctoMPT
                                 </div>
-                                <span className="text-[9px] text-slate-500 dark:text-neutral-400 font-semibold block mt-0.5">
-                                  Verified Digital Signature
+                                <span className="text-[9px] text-slate-500 dark:text-neutral-400 font-semibold block mt-0.5 flex items-center gap-1 justify-end">
+                                  <ShieldCheck className="w-3 h-3 text-teal-600" />
+                                  <span>Verified Digital Signature</span>
                                 </span>
                               </div>
                             </div>
@@ -1437,12 +1556,22 @@ export default function RecordsPage() {
                             {/* Full-width Download PDF Button on Mobile */}
                             <button
                               type="button"
-                              onClick={() => handleDownloadPdf(item.prescription)}
+                              onClick={() => handleDownloadPdf(item.prescription, item.id)}
                               className="w-full mt-2 py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors"
                             >
                               <Download className="w-3.5 h-3.5" />
                               <span>Download Official Prescription PDF</span>
                             </button>
+                          </div>
+                        ) : (
+                          <div className="p-4 rounded-xl bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 text-center flex flex-col items-center justify-center gap-1.5 text-xs">
+                            <Pill className="w-5 h-5 text-slate-400 dark:text-neutral-600" />
+                            <span className="font-semibold text-slate-700 dark:text-neutral-300">
+                              Triage Consultation - No Prescription Issued
+                            </span>
+                            <p className="text-[11px] text-slate-500 dark:text-neutral-500 max-w-xs">
+                              This session recorded conversational triage dialogue without generating a pharmacological prescription.
+                            </p>
                           </div>
                         )}
                       </div>
