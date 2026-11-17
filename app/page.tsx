@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { useGeminiLive } from '@/hooks/useGeminiLive';
 import { DoctorAvatar } from '@/components/DoctorAvatar';
 import { generatePrescriptionPdf } from '@/lib/prescription-pdf';
@@ -514,8 +515,18 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Top Right Controls: Status Pill + Light/Dark Mode Toggle + Hamburger Menu */}
+          {/* Top Right Controls: Records Link + Status Pill + Light/Dark Mode Toggle + Hamburger Menu */}
           <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Patient Records Portal Link */}
+            <Link
+              href="/records"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-slate-700 dark:text-neutral-200 hover:bg-slate-100 dark:hover:bg-neutral-800 hover:border-teal-500/40 transition-all cursor-pointer shadow-xs text-xs font-semibold"
+              title="View Patient Records & Prescription Archive"
+            >
+              <FileText className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+              <span className="hidden sm:inline">Records</span>
+            </Link>
+
             {/* Live Audio Status Pill */}
             <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-neutral-800 bg-slate-100/80 dark:bg-neutral-900 text-xs">
               <span
@@ -764,11 +775,32 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Section 5: Consultation Records (NoSQL) */}
+          {/* Section 5: Consultation Records (EMR Portal & Database) */}
           <div className="space-y-2">
             <label className="text-[11px] font-bold tracking-wider uppercase text-slate-500 dark:text-neutral-400 block">
               Electronic Health Records (EMR)
             </label>
+            <Link
+              href="/records"
+              onClick={() => setIsSidePanelOpen(false)}
+              className="w-full p-3 rounded-xl border border-teal-200 dark:border-teal-800/60 bg-teal-50/60 dark:bg-teal-950/30 hover:bg-teal-100/60 dark:hover:bg-teal-900/30 text-left transition-colors flex items-center justify-between group cursor-pointer shadow-xs"
+            >
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                <div>
+                  <span className="font-semibold text-teal-950 dark:text-teal-200 block">
+                    Full Records Portal (/records)
+                  </span>
+                  <span className="text-[11px] text-teal-700/80 dark:text-teal-400/80">
+                    Search patient history, dialogue & download PDF
+                  </span>
+                </div>
+              </div>
+              <span className="text-xs text-teal-700 dark:text-teal-300 font-bold group-hover:underline">
+                Open &rarr;
+              </span>
+            </Link>
+
             <button
               type="button"
               onClick={() => {
@@ -776,16 +808,16 @@ export default function Home() {
                 setShowHistoryModal(true);
                 setIsSidePanelOpen(false);
               }}
-              className="w-full p-3 rounded-xl border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-slate-50 dark:hover:bg-neutral-800 text-left transition-colors flex items-center justify-between group cursor-pointer shadow-xs"
+              className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-slate-50 dark:hover:bg-neutral-800 text-left transition-colors flex items-center justify-between group cursor-pointer shadow-xs"
             >
               <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <Database className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                 <div>
                   <span className="font-semibold text-slate-800 dark:text-neutral-200 block">
-                    Saved Consultations Database
+                    Quick History Modal
                   </span>
                   <span className="text-[11px] text-slate-500 dark:text-neutral-400">
-                    View previous patient transcripts & Rx
+                    Fast popover of recent consultations
                   </span>
                 </div>
               </div>

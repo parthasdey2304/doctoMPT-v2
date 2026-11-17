@@ -274,6 +274,19 @@ export async function POST(req: NextRequest) {
     const resolvedVoice = voiceProfile || 'Charon';
     const resolvedAudioDevice = audioDevice || 'Default Microphone';
 
+    const resolvedReferenceCode =
+      prescription?.referenceCode ||
+      `RX-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+    const resolvedPrescription: PrescriptionData | undefined = prescription
+      ? {
+          ...prescription,
+          referenceCode: resolvedReferenceCode,
+          doctorName: prescription.doctorName || 'Dr. DoctoMPT',
+          clinicName: prescription.clinicName || 'DoctoMPT Clinic',
+        }
+      : undefined;
+
     let recordId = `rx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     let createdAt = new Date().toISOString();
     let savedToSupabase = false;
@@ -340,21 +353,21 @@ export async function POST(req: NextRequest) {
             savedToSupabase = true;
 
             // 3. Insert into prescriptions (if prescription was generated)
-            if (prescription) {
+            if (resolvedPrescription) {
               const { data: rxRow, error: rxErr } = await supabase
                 .from('prescriptions')
                 .insert({
                   consultation_id: consultationRow.id,
-                  patient_name: prescription.patientName || patName,
-                  patient_age: prescription.patientAge || patAge,
-                  date: prescription.date || new Date().toLocaleDateString(),
-                  chief_complaint: prescription.chiefComplaint || resolvedChiefComplaint,
-                  assessment_notes: prescription.assessmentNotes || resolvedDoctorNotes,
-                  advice: Array.isArray(prescription.advice) ? prescription.advice : [],
-                  follow_up: prescription.followUp || 'As needed',
-                  reference_code: prescription.referenceCode || `RX-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-                  doctor_signature: prescription.doctorName || 'Dr. DoctoMPT',
-                  clinic_name: prescription.clinicName || 'DoctoMPT Clinic',
+                  patient_name: resolvedPrescription.patientName || patName,
+                  patient_age: resolvedPrescription.patientAge || patAge,
+                  date: resolvedPrescription.date || new Date().toLocaleDateString(),
+                  chief_complaint: resolvedPrescription.chiefComplaint || resolvedChiefComplaint,
+                  assessment_notes: resolvedPrescription.assessmentNotes || resolvedDoctorNotes,
+                  advice: Array.isArray(resolvedPrescription.advice) ? resolvedPrescription.advice : [],
+                  follow_up: resolvedPrescription.followUp || 'As needed',
+                  reference_code: resolvedReferenceCode,
+                  doctor_signature: resolvedPrescription.doctorName || 'Dr. DoctoMPT',
+                  clinic_name: resolvedPrescription.clinicName || 'DoctoMPT Clinic',
                 })
                 .select()
                 .single();
@@ -410,7 +423,7 @@ export async function POST(req: NextRequest) {
       userAgent,
       status: 'completed',
       transcript,
-      prescription,
+      prescription: resolvedPrescription,
     };
 
     // Dual-store resilience: local disk store
