@@ -312,6 +312,45 @@ export default function Home() {
       setPrescription(data);
       // Auto-download PDF
       generatePrescriptionPdf(data, true);
+
+      // Automatically persist consultation and prescription to Supabase immediately upon generation
+      try {
+        const activeMicLabel =
+          audioDevices.find((d) => d.deviceId === selectedAudioDeviceId)?.label ||
+          selectedAudioDeviceId ||
+          'Default Microphone';
+
+        const saveRes = await fetch('/api/save-consultation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transcript,
+            prescription: data,
+            patientName: data?.patientName || patientName || 'Demo Patient',
+            patientAge: data?.patientAge || patientAge || 'Not specified',
+            primaryCondition: data?.chiefComplaint,
+            chiefComplaint: data?.chiefComplaint,
+            clinicalImpression: data?.assessmentNotes,
+            doctorNotes: data?.assessmentNotes,
+            clinicalPrompt: systemInstruction,
+            language: selectedLanguage,
+            voiceProfile: selectedVoice,
+            audioDevice: activeMicLabel,
+          }),
+        });
+
+        if (saveRes.ok) {
+          const saveResult = await saveRes.json();
+          setSavedSuccessMessage(
+            saveResult.source === 'supabase'
+              ? 'Consultation and prescription automatically saved to Supabase!'
+              : 'Consultation and prescription saved to database!'
+          );
+          setTimeout(() => setSavedSuccessMessage(null), 4000);
+        }
+      } catch (autoSaveErr) {
+        console.warn('Auto-save to Supabase failed:', autoSaveErr);
+      }
     } catch (err: any) {
       console.error('Prescription generation failed:', err);
       setPrescriptionError(formatErrorMessage(err));
@@ -321,7 +360,18 @@ export default function Home() {
       setIsGeneratingPrescription(false);
       setWritingState(false);
     }
-  }, [transcript, apiKey, patientName, patientAge, setWritingState]);
+  }, [
+    transcript,
+    apiKey,
+    patientName,
+    patientAge,
+    setWritingState,
+    audioDevices,
+    selectedAudioDeviceId,
+    systemInstruction,
+    selectedLanguage,
+    selectedVoice,
+  ]);
 
   const autoTriggeredRxRef = useRef(false);
 
@@ -344,12 +394,17 @@ export default function Home() {
     }
   }, [transcript, isGeneratingPrescription, handleGeneratePrescription]);
 
-  // Save consultation to NoSQL database
+  // Save consultation to Supabase database
   const handleSaveToDatabase = async () => {
     if (transcript.length === 0) return;
     try {
       setIsSavingToDb(true);
       setSavedSuccessMessage(null);
+
+      const activeMicLabel =
+        audioDevices.find((d) => d.deviceId === selectedAudioDeviceId)?.label ||
+        selectedAudioDeviceId ||
+        'Default Microphone';
 
       const res = await fetch('/api/save-consultation', {
         method: 'POST',
@@ -359,12 +414,24 @@ export default function Home() {
           prescription,
           patientName: prescription?.patientName || patientName || 'Demo Patient',
           patientAge: prescription?.patientAge || patientAge || 'Not specified',
+          primaryCondition: prescription?.chiefComplaint,
+          chiefComplaint: prescription?.chiefComplaint,
+          clinicalImpression: prescription?.assessmentNotes,
+          doctorNotes: prescription?.assessmentNotes,
+          clinicalPrompt: systemInstruction,
+          language: selectedLanguage,
+          voiceProfile: selectedVoice,
+          audioDevice: activeMicLabel,
         }),
       });
 
       const result = await res.json();
       if (res.ok) {
-        setSavedSuccessMessage('Consultation stored in NoSQL database successfully!');
+        setSavedSuccessMessage(
+          result.source === 'supabase'
+            ? 'Consultation stored in Supabase SQL database successfully!'
+            : 'Consultation stored in database successfully!'
+        );
         setTimeout(() => setSavedSuccessMessage(null), 4000);
       } else {
         throw new Error(result.error || 'Failed to save');
@@ -1228,7 +1295,7 @@ export default function Home() {
                     className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-white dark:bg-neutral-800 hover:bg-slate-100 dark:hover:bg-neutral-700 border border-slate-200 dark:border-neutral-700 text-slate-700 dark:text-neutral-200 transition-colors shadow-xs cursor-pointer"
                   >
                     <Database className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>{isSavingToDb ? 'Saving...' : 'Save to NoSQL Database'}</span>
+                    <span>{isSavingToDb ? 'Saving...' : 'Save to Supabase Database'}</span>
                   </button>
                 </div>
               </div>
@@ -1412,6 +1479,31 @@ export default function Home() {
                         {new Date(item.createdAt).toLocaleString()}
                       </span>
                     </div>
+
+                    {(item.primaryCondition || item.language || item.clientIp || item.voiceProfile) && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {item.primaryCondition && (
+                          <span className="px-2 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-[10px] font-medium text-teal-700 dark:text-teal-300">
+                            {item.primaryCondition}
+                          </span>
+                        )}
+                        {item.language && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-neutral-800 text-[10px] text-slate-600 dark:text-neutral-400">
+                            {item.language}
+                          </span>
+                        )}
+                        {item.voiceProfile && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-neutral-800 text-[10px] text-slate-600 dark:text-neutral-400">
+                            Voice: {item.voiceProfile.split(' ')[0]}
+                          </span>
+                        )}
+                        {item.clientIp && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-neutral-800 text-[10px] font-mono text-slate-500 dark:text-neutral-500">
+                            IP: {item.clientIp}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     <p className="text-slate-600 dark:text-neutral-400 line-clamp-1">
                       {item.transcript[0]?.text || 'No dialogue summary'}

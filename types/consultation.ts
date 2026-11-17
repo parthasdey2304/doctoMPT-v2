@@ -28,6 +28,7 @@ export interface PrescriptionData {
   followUp: string;
   doctorName?: string;
   clinicName?: string;
+  referenceCode?: string;
 }
 
 export type DoctorVisualState = 'idle' | 'listening' | 'speaking' | 'writing';
@@ -39,4 +40,16 @@ export interface SavedConsultation {
   patientAge: string;
   transcript: TranscriptItem[];
   prescription?: PrescriptionData;
+  primaryCondition?: string;
+  chiefComplaint?: string;
+  symptoms?: string[];
+  clinicalImpression?: string;
+  doctorNotes?: string;
+  clinicalPrompt?: string;
+  language?: string;
+  voiceProfile?: string;
+  audioDevice?: string;
+  clientIp?: string;
+  userAgent?: string;
+  status?: string;
 }
