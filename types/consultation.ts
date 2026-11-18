@@ -71,6 +71,38 @@ export interface PhysicalPrescriptionOCR {
   fileName?: string;
 }
 
+export type LabResultStatus = 'normal' | 'high' | 'low' | 'critical' | 'abnormal' | 'borderline';
+
+export interface LabTestItem {
+  testName: string;
+  category?: string; // e.g., 'Hematology (CBC)', 'Liver Function (LFT)', 'Renal / Kidney (KFT)', 'Lipid Profile', 'Diabetic Profile', 'Thyroid Profile', 'Urinalysis'
+  observedValue: string;
+  unit?: string;
+  referenceRange?: string;
+  status: LabResultStatus;
+  clinicalSignificance?: string;
+}
+
+export interface LabReportOCR {
+  laboratoryName?: string;
+  accreditation?: string; // e.g. NABL Accredited, CAP, ISO 15189
+  patientName?: string;
+  patientAge?: string;
+  patientGender?: string;
+  referringDoctor?: string;
+  collectionDate?: string;
+  reportDate?: string;
+  sampleType?: string; // e.g. EDTA Whole Blood, Serum, Spot Urine
+  overallImpression: string;
+  abnormalFindings: string[];
+  tests: LabTestItem[];
+  criticalAlerts?: string[];
+  rawText?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  pageCount?: number;
+  fileName?: string;
+}
+
 export interface SavedConsultation {
   id: string;
   createdAt: string;
@@ -79,6 +111,7 @@ export interface SavedConsultation {
   transcript: TranscriptItem[];
   prescription?: PrescriptionData;
   physicalPrescription?: PhysicalPrescriptionOCR;
+  labReport?: LabReportOCR;
   primaryCondition?: string;
   chiefComplaint?: string;
   symptoms?: string[];

@@ -866,6 +866,18 @@ export function useGeminiLive({
           ) {
             reply = `Aap physical doctor ka prescription image ya multi-page PDF me screen par upload kar sakte hain. Humare medical OCR system se main doctor ki handwriting aur medicines analyze karke aage ka treatment plan banaunga.`;
           } else if (
+            lower.includes('lab test') ||
+            lower.includes('blood test') ||
+            lower.includes('test report') ||
+            lower.includes('cbc') ||
+            lower.includes('lft') ||
+            lower.includes('kft') ||
+            lower.includes('blood report') ||
+            lower.includes('sugar test') ||
+            lower.includes('uploaded laboratory report')
+          ) {
+            reply = `Aap apna diagnostic lab test report image ya PDF format me screen par upload kar sakte hain. Humare diagnostic OCR system se main aapke test values aur reference ranges analyze karke treatment guide karunga.`;
+          } else if (
             lower.includes('fever') ||
             lower.includes('throat') ||
             lower.includes('headache') ||
@@ -922,6 +934,18 @@ export function useGeminiLive({
           ) {
             reply = `Aapni apnar previous physical doctor-er prescription image ba PDF hishebe screen-e upload korun. OCR diye ami handwriting aar medicines check kore apnar treatment guide korbo.`;
           } else if (
+            lower.includes('lab test') ||
+            lower.includes('blood test') ||
+            lower.includes('test report') ||
+            lower.includes('cbc') ||
+            lower.includes('lft') ||
+            lower.includes('kft') ||
+            lower.includes('blood report') ||
+            lower.includes('sugar test') ||
+            lower.includes('uploaded laboratory report')
+          ) {
+            reply = `Aapni apnar lab test ba blood report image ba PDF hishebe screen-e upload korun. Diagnostic OCR diye ami apnar report values aar abnormal findings dekhe guide korbo.`;
+          } else if (
             lower.includes('fever') ||
             lower.includes('throat') ||
             lower.includes('headache') ||
@@ -976,6 +1000,20 @@ export function useGeminiLive({
             (lower.includes('prescription') && (lower.includes('upload') || lower.includes('old') || lower.includes('previous') || lower.includes('slip')))
           ) {
             reply = `Please upload your previous physical doctor's prescription—either as an image or a PDF—using the Prescription Upload feature on your screen. Our medical OCR will examine the doctor's handwriting and medications so we can review your care.`;
+          } else if (
+            lower.includes('lab test') ||
+            lower.includes('blood test') ||
+            lower.includes('test report') ||
+            lower.includes('laboratory') ||
+            lower.includes('cbc') ||
+            lower.includes('lft') ||
+            lower.includes('kft') ||
+            lower.includes('lipid') ||
+            lower.includes('blood report') ||
+            lower.includes('sugar test') ||
+            lower.includes('uploaded laboratory report')
+          ) {
+            reply = `Please upload your diagnostic laboratory report—either as an image or a PDF—using the Laboratory Reports OCR feature on your screen. I will analyze your blood counts, reference ranges, and abnormal markers with you.`;
           } else if (
             lower.includes('fever') ||
             lower.includes('throat') ||

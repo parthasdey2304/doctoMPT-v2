@@ -3,6 +3,8 @@ import {
   DEFAULT_DOCTOR_SYSTEM_INSTRUCTION,
   DEFAULT_DOCTOR_VOICE,
   AVAILABLE_VOICES,
+  INACTIVITY_TIMEOUT_SECONDS,
+  INACTIVITY_WARNING_SECONDS,
   CONSULTATION_LANGUAGES,
   getLanguageInstruction,
   buildSystemInstructionWithLanguage,
@@ -17,6 +19,12 @@ describe('Doctor Consultation Flow & Protocol Guidelines', () => {
     const charonVoice = AVAILABLE_VOICES.find((v) => v.id === 'Charon');
     expect(charonVoice).toBeDefined();
     expect(charonVoice?.label.toLowerCase()).toContain('male');
+  });
+
+  test('Inactivity Timeout & Auto-Hangup constants are configured to 1 minute', () => {
+    expect(INACTIVITY_TIMEOUT_SECONDS).toBe(60);
+    expect(INACTIVITY_WARNING_SECONDS).toBe(15);
+    expect(INACTIVITY_WARNING_SECONDS).toBeLessThan(INACTIVITY_TIMEOUT_SECONDS);
   });
 
   test('DEFAULT_DOCTOR_SYSTEM_INSTRUCTION contains name/age greeting prompt requirement', () => {

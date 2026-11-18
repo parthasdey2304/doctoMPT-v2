@@ -222,6 +222,7 @@ export async function POST(req: NextRequest) {
       voiceProfile,
       audioDevice,
       physicalPrescription,
+      labReport,
     } = body;
 
     if (!transcript || !Array.isArray(transcript) || transcript.length === 0) {
@@ -426,6 +427,7 @@ export async function POST(req: NextRequest) {
       transcript,
       prescription: resolvedPrescription,
       physicalPrescription: physicalPrescription || undefined,
+      labReport: labReport || undefined,
     };
 
     // Dual-store resilience: local disk store

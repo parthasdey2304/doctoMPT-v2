@@ -16,10 +16,13 @@ import {
   DEFAULT_CONSULTATION_LANGUAGE,
   buildSystemInstructionWithLanguage,
   shouldAutoTriggerRx,
+  INACTIVITY_TIMEOUT_SECONDS,
+  INACTIVITY_WARNING_SECONDS,
 } from '@/lib/constants';
-import { PrescriptionData, SavedConsultation, PhysicalPrescriptionOCR } from '@/types/consultation';
+import { PrescriptionData, SavedConsultation, PhysicalPrescriptionOCR, LabReportOCR, LabTestItem } from '@/types/consultation';
 import { normalizeMedication } from '@/lib/medication-utils';
 import { synthesizeFallbackOcr } from '@/lib/prescription-ocr';
+import { synthesizeFallbackLabReport } from '@/lib/lab-report-ocr';
 import {
   Stethoscope,
   Mic,
@@ -52,6 +55,9 @@ import {
   ScanText,
   Plus,
   RotateCcw,
+  FlaskConical,
+  Activity,
+  Microscope,
 } from 'lucide-react';
 
 export default function Home() {
@@ -103,13 +109,29 @@ export default function Home() {
   const [showOcrDetails, setShowOcrDetails] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Laboratory Tests & Diagnostic Reports OCR State
+  const [labReport, setLabReport] = useState<LabReportOCR | null>(null);
+  const [isProcessingLabOcr, setIsProcessingLabOcr] = useState(false);
+  const [labOcrError, setLabOcrError] = useState<string | null>(null);
+  const [showLabOcrDetails, setShowLabOcrDetails] = useState(true);
+  const labFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Active Document Tab: 'prescription' or 'lab'
+  const [activeDocOcrTab, setActiveDocOcrTab] = useState<'prescription' | 'lab'>('prescription');
+
   // In-Browser Live Camera Scanner State (like Google Meet)
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
   const [isCaptureMenuOpen, setIsCaptureMenuOpen] = useState(false);
   const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraDocTarget, setCameraDocTarget] = useState<'prescription' | 'lab'>('prescription');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+
+  // Inactivity timeout & auto-hangup state (1 minute silence threshold)
+  const [inactivitySecondsLeft, setInactivitySecondsLeft] = useState<number>(INACTIVITY_TIMEOUT_SECONDS);
+  const [showInactivityWarning, setShowInactivityWarning] = useState(false);
+  const hasWarnedInactivityRef = useRef<boolean>(false);
 
   // Saved Consultations history from NoSQL database
   const [savedConsultations, setSavedConsultations] = useState<SavedConsultation[]>([]);
@@ -145,6 +167,112 @@ export default function Home() {
     audioDeviceId: selectedAudioDeviceId,
     consultationLanguage: selectedLanguage,
   });
+
+  // Reset inactivity timer to 60 seconds whenever user interacts or speaks
+  const resetInactivityTimer = useCallback(() => {
+    setInactivitySecondsLeft(INACTIVITY_TIMEOUT_SECONDS);
+    setShowInactivityWarning(false);
+    hasWarnedInactivityRef.current = false;
+  }, []);
+
+  // Monitor 1-minute idle state during consultation and auto-hangup
+  useEffect(() => {
+    if (!isConnected) {
+      resetInactivityTimer();
+      return;
+    }
+
+    // While doctor is actively speaking, patient is listening, so keep timer fresh
+    if (visualState === 'speaking') {
+      resetInactivityTimer();
+      return;
+    }
+
+    // Reset timer if mic activity is detected (patient speaking into microphone)
+    if (micLevel > 0.08) {
+      resetInactivityTimer();
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setInactivitySecondsLeft((prev) => {
+        const next = prev - 1;
+
+        // Trigger warning notice at 15 seconds remaining
+        if (next <= INACTIVITY_WARNING_SECONDS && next > 0) {
+          setShowInactivityWarning(true);
+          if (!hasWarnedInactivityRef.current) {
+            hasWarnedInactivityRef.current = true;
+            const reminder =
+              selectedLanguage === 'hinglish'
+                ? 'Kaafi der se koi aawaz nahi aayi. Kya aap sun rahe hain? Agar nahi to main call disconnect kar dunga.'
+                : selectedLanguage === 'benglish'
+                ? 'Onekkhon dhore kono kotha shona jachhe na. Apni ki achen? Na hole ami call-ta conclude korbo.'
+                : "It's gotten quiet. If you're still with me, please speak or reply, otherwise I will conclude our consultation.";
+            if (speakDoctorText) {
+              speakDoctorText(reminder);
+            }
+          }
+        }
+
+        // Auto-hangup when reaching 0 (full 1 minute of silence)
+        if (next <= 0) {
+          clearInterval(interval);
+          setShowInactivityWarning(false);
+          const timeoutFarewell =
+            selectedLanguage === 'hinglish'
+              ? '1 minute se koi response nahi milne par main call disconnect kar raha hoon. Apna khayal rakhein!'
+              : selectedLanguage === 'benglish'
+              ? '1 minute dhore kono response na paoway ami call disconnect korchi. Bhalo thakben!'
+              : 'Since no response was received for 1 minute, I am ending our consultation call now. Take care!';
+
+          setTranscript((curr) => [
+            ...curr,
+            {
+              id: Date.now().toString(),
+              role: 'doctor',
+              text: timeoutFarewell,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+            {
+              id: (Date.now() + 1).toString(),
+              role: 'doctor',
+              text: '⏱️ Consultation automatically ended due to 1 minute of user inactivity.',
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+
+          if (speakDoctorText) {
+            speakDoctorText(timeoutFarewell);
+          }
+
+          disconnect();
+          return 0;
+        }
+
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [
+    isConnected,
+    visualState,
+    micLevel,
+    resetInactivityTimer,
+    selectedLanguage,
+    speakDoctorText,
+    disconnect,
+    setTranscript,
+  ]);
+
+  // Reset inactivity timer whenever a new patient turn appears in transcript
+  useEffect(() => {
+    const last = transcript[transcript.length - 1];
+    if (last && last.role === 'patient') {
+      resetInactivityTimer();
+    }
+  }, [transcript, resetInactivityTimer]);
 
   // Theme synchronization on mount and toggle
   useEffect(() => {
@@ -448,6 +576,7 @@ export default function Home() {
           voiceProfile: selectedVoice,
           audioDevice: activeMicLabel,
           physicalPrescription,
+          labReport,
         }),
       });
 
@@ -489,6 +618,7 @@ export default function Home() {
   const handleSendText = (e: React.FormEvent) => {
     e.preventDefault();
     if (!textInput.trim()) return;
+    resetInactivityTimer();
     sendTextMessage(textInput);
     setTextInput('');
   };
@@ -658,7 +788,8 @@ export default function Home() {
     }
   };
 
-  const openCameraModal = () => {
+  const openCameraModal = (target: 'prescription' | 'lab' = 'prescription') => {
+    setCameraDocTarget(target);
     setIsCaptureMenuOpen(false);
     setIsCameraModalOpen(true);
     setTimeout(() => {
@@ -681,6 +812,202 @@ export default function Home() {
     startCamera(nextMode);
   };
 
+  // Process base64 lab report via OCR endpoint
+  const processLabReportBase64 = async (
+    base64OrDataUrl: string,
+    fileName = 'camera-lab-report.jpg',
+    mimeType = 'image/jpeg'
+  ) => {
+    setIsProcessingLabOcr(true);
+    setLabOcrError(null);
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (apiKey) {
+        headers['x-gemini-api-key'] = apiKey;
+      }
+
+      const res = await fetch('/api/ocr-lab-report', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          fileBase64: base64OrDataUrl,
+          fileName,
+          mimeType,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to process laboratory report OCR');
+      }
+
+      const ocrResult: LabReportOCR = data.labReport;
+      setLabReport(ocrResult);
+      setShowLabOcrDetails(true);
+      setActiveDocOcrTab('lab');
+
+      const abnormalSummary = ocrResult.abnormalFindings && ocrResult.abnormalFindings.length > 0
+        ? ocrResult.abnormalFindings.join('; ')
+        : 'All tested parameters within normal reference ranges';
+
+      const uploadNotice = `[Captured Diagnostic Laboratory Report with Live Camera: ${ocrResult.laboratoryName || 'Diagnostic Lab'}: Impression: ${ocrResult.overallImpression}. Abnormal Findings: ${abnormalSummary}]`;
+
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: 'patient',
+          text: uploadNotice,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+
+      const doctorAckText = ocrResult.abnormalFindings && ocrResult.abnormalFindings.length > 0
+        ? `Thank you for sharing your lab report from ${ocrResult.laboratoryName || 'the laboratory'}. I have reviewed your test values and flagged the key deviations: ${ocrResult.abnormalFindings.slice(0, 2).join(' and ')}. Let's review these clinical findings and discuss what they mean for your care.`
+        : `I have analyzed your laboratory report from ${ocrResult.laboratoryName || 'the laboratory'}. Your blood counts and tested parameters look stable and within baseline limits. How are you feeling overall right now?`;
+
+      setTimeout(() => {
+        setTranscript((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            role: 'doctor',
+            text: doctorAckText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        if (speakDoctorText) {
+          speakDoctorText(doctorAckText);
+        }
+      }, 700);
+    } catch (err: any) {
+      console.error('Lab report OCR error:', err);
+      setLabOcrError(err?.message || 'Error processing lab report');
+    } finally {
+      setIsProcessingLabOcr(false);
+    }
+  };
+
+  // Handle lab report file upload & OCR processing
+  const handleLabFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingLabOcr(true);
+    setLabOcrError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const headers: Record<string, string> = {};
+      if (apiKey) {
+        headers['x-gemini-api-key'] = apiKey;
+      }
+
+      const res = await fetch('/api/ocr-lab-report', {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to process laboratory report OCR');
+      }
+
+      const ocrResult: LabReportOCR = data.labReport;
+      setLabReport(ocrResult);
+      setShowLabOcrDetails(true);
+      setActiveDocOcrTab('lab');
+
+      const abnormalSummary = ocrResult.abnormalFindings && ocrResult.abnormalFindings.length > 0
+        ? ocrResult.abnormalFindings.join('; ')
+        : 'All tested parameters within normal reference ranges';
+
+      const uploadNotice = `[Uploaded Diagnostic Laboratory Report from ${ocrResult.laboratoryName || 'Diagnostic Lab'}: Impression: ${ocrResult.overallImpression}. Abnormal Findings: ${abnormalSummary}]`;
+
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: 'patient',
+          text: uploadNotice,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+
+      const doctorAckText = ocrResult.abnormalFindings && ocrResult.abnormalFindings.length > 0
+        ? `Thank you for sharing your lab report from ${ocrResult.laboratoryName || 'the laboratory'}. I have reviewed your test values and flagged the key deviations: ${ocrResult.abnormalFindings.slice(0, 2).join(' and ')}. Let's review these clinical findings and discuss what they mean for your care.`
+        : `I have analyzed your laboratory report from ${ocrResult.laboratoryName || 'the laboratory'}. Your blood counts and tested parameters look stable and within baseline limits. How are you feeling overall right now?`;
+
+      setTimeout(() => {
+        setTranscript((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            role: 'doctor',
+            text: doctorAckText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        if (speakDoctorText) {
+          speakDoctorText(doctorAckText);
+        }
+      }, 700);
+    } catch (err: any) {
+      console.error('Lab report OCR upload error:', err);
+      setLabOcrError(err?.message || 'Error uploading lab report');
+    } finally {
+      setIsProcessingLabOcr(false);
+    }
+  };
+
+  // Load sample diagnostic lab report for instant testing
+  const loadSampleLabReport = () => {
+    closeCameraModal();
+    const sample = synthesizeFallbackLabReport('dr-lal-pathlabs-cbc-report.pdf');
+    setLabReport(sample);
+    setShowLabOcrDetails(true);
+    setActiveDocOcrTab('lab');
+
+    const abnormalSummary = sample.abnormalFindings && sample.abnormalFindings.length > 0
+      ? sample.abnormalFindings.join('; ')
+      : 'All tested parameters within normal reference ranges';
+
+    const uploadNotice = `[Uploaded Diagnostic Laboratory Report from ${sample.laboratoryName}: Impression: ${sample.overallImpression}. Abnormal Findings: ${abnormalSummary}]`;
+
+    setTranscript((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        role: 'patient',
+        text: uploadNotice,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
+
+    const doctorAckText = `Thank you for sharing your lab report from ${sample.laboratoryName}. I have reviewed your test values and flagged the key deviations: ${sample.abnormalFindings.slice(0, 2).join(' and ')}. Let's review these clinical findings and discuss what they mean for your care.`;
+
+    setTimeout(() => {
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          role: 'doctor',
+          text: doctorAckText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+      if (speakDoctorText) {
+        speakDoctorText(doctorAckText);
+      }
+    }, 700);
+  };
+
   // Capture photo from video feed and send directly to OCR
   const capturePhotoAndScan = async () => {
     if (!videoRef.current) return;
@@ -699,7 +1026,11 @@ export default function Home() {
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
     closeCameraModal();
-    await processPrescriptionBase64(dataUrl, 'camera-prescription.jpg', 'image/jpeg');
+    if (cameraDocTarget === 'lab') {
+      await processLabReportBase64(dataUrl, 'camera-lab-report.jpg', 'image/jpeg');
+    } else {
+      await processPrescriptionBase64(dataUrl, 'camera-prescription.jpg', 'image/jpeg');
+    }
   };
 
   // Handle prescription file upload & OCR processing
@@ -1331,26 +1662,64 @@ export default function Home() {
               </button>
             )}
 
-            {/* Physical Doctor Prescription & Handwriting OCR Card */}
+            {/* Document Ingestion & Optical Character Recognition (OCR) Suite */}
             <div className="w-full mt-3 p-3.5 rounded-xl border border-teal-200/90 dark:border-teal-800/60 bg-teal-50/40 dark:bg-teal-950/20 shadow-xs">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-teal-600 text-white shrink-0">
-                    <ScanText className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                      Physical Doctor Prescription OCR
-                    </h4>
-                    <p className="text-[11px] text-slate-500 dark:text-neutral-400">
-                      Deciphers challenging handwriting & 1-0-1 dosages
-                    </p>
-                  </div>
-                </div>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-teal-100 text-teal-800 dark:bg-teal-900/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800/50">
-                  PDF & Images
-                </span>
+              {/* Document Type Selector Tabs */}
+              <div className="flex items-center gap-1.5 p-1 mb-2.5 bg-slate-200/70 dark:bg-neutral-800/80 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setActiveDocOcrTab('prescription')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    activeDocOcrTab === 'prescription'
+                      ? 'bg-white dark:bg-neutral-900 text-teal-800 dark:text-teal-300 shadow-xs'
+                      : 'text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <ScanText className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                  <span>Physical Doctor Rx</span>
+                  {physicalPrescription && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" title="Prescription loaded" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveDocOcrTab('lab')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    activeDocOcrTab === 'lab'
+                      ? 'bg-white dark:bg-neutral-900 text-blue-800 dark:text-blue-300 shadow-xs'
+                      : 'text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <FlaskConical className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>Lab & Tests OCR</span>
+                  {labReport && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" title="Lab report loaded" />
+                  )}
+                </button>
               </div>
+
+              {/* TAB 1: Physical Doctor Prescription & Handwriting OCR */}
+              {activeDocOcrTab === 'prescription' && (
+                <>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-teal-600 text-white shrink-0">
+                        <ScanText className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          Physical Doctor Prescription OCR
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-neutral-400">
+                          Deciphers challenging handwriting & 1-0-1 dosages
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-teal-100 text-teal-800 dark:bg-teal-900/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800/50">
+                      PDF & Images
+                    </span>
+                  </div>
 
               <input
                 type="file"
@@ -1365,7 +1734,7 @@ export default function Home() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={openCameraModal}
+                      onClick={() => openCameraModal('prescription')}
                       disabled={isProcessingOcr}
                       className="py-2.5 px-3 rounded-lg border border-teal-300 hover:border-teal-500 dark:border-teal-700/60 dark:hover:border-teal-500 bg-white dark:bg-neutral-900 text-teal-800 dark:text-teal-200 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-xs hover:bg-teal-50/50 disabled:opacity-50"
                       title="Take a live photo using Chrome's in-browser camera"
@@ -1529,11 +1898,232 @@ export default function Home() {
                 </div>
               )}
 
-              {ocrError && (
-                <div className="mt-2 p-2 rounded bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-300 text-xs flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  <span>{ocrError}</span>
-                </div>
+                  {ocrError && (
+                    <div className="mt-2 p-2 rounded bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-300 text-xs flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{ocrError}</span>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* TAB 2: Laboratory Tests & Diagnostic Reports OCR */}
+              {activeDocOcrTab === 'lab' && (
+                <>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-blue-600 text-white shrink-0">
+                        <FlaskConical className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          Laboratory & Diagnostic Tests OCR
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-neutral-400">
+                          Parses CBC, LFT, KFT, Blood Sugar, HbA1c & Pathology
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50">
+                      PDF & Images
+                    </span>
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={labFileInputRef}
+                    onChange={handleLabFileUpload}
+                    accept=".pdf,image/png,image/jpeg,image/jpg,image/webp"
+                    className="hidden"
+                  />
+
+                  {!labReport ? (
+                    <div className="mt-2 space-y-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openCameraModal('lab')}
+                          disabled={isProcessingLabOcr}
+                          className="py-2.5 px-3 rounded-lg border border-blue-300 hover:border-blue-500 dark:border-blue-700/60 dark:hover:border-blue-500 bg-white dark:bg-neutral-900 text-blue-800 dark:text-blue-200 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-xs hover:bg-blue-50/50 disabled:opacity-50"
+                          title="Take a live photo of your lab report using Chrome's in-browser camera"
+                        >
+                          <Camera className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                          <span>Live Camera Photo</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => labFileInputRef.current?.click()}
+                          disabled={isProcessingLabOcr}
+                          className="py-2.5 px-3 rounded-lg border border-blue-300 hover:border-blue-500 dark:border-blue-700/60 dark:hover:border-blue-500 bg-white dark:bg-neutral-900 text-blue-800 dark:text-blue-200 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-xs hover:bg-blue-50/50 disabled:opacity-50"
+                          title="Upload a multi-page PDF or image lab report"
+                        >
+                          <UploadCloud className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                          <span>Upload PDF / Image</span>
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={loadSampleLabReport}
+                        disabled={isProcessingLabOcr}
+                        className="w-full py-2 px-3 rounded-lg border border-dashed border-amber-300 dark:border-amber-700/60 bg-amber-50/60 hover:bg-amber-100/80 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                        title="Load realistic Dr Lal PathLabs CBC & LFT test report for instant testing"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                        <span>Load Sample CBC & LFT Test Report</span>
+                      </button>
+
+                      {isProcessingLabOcr && (
+                        <div className="py-2 px-3 rounded-lg bg-blue-100/80 dark:bg-blue-950/80 text-blue-900 dark:text-blue-200 text-xs flex items-center justify-center gap-2 animate-pulse">
+                          <span className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                          <span>Biomedical OCR: Analyzing Lab Values & Reference Ranges...</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-neutral-500 px-1">
+                        <span>NABL & CAP accredited lab formats</span>
+                        <span>Auto-flags High, Low & Panic values</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      <div className="p-3 rounded-lg bg-white dark:bg-neutral-900 border border-blue-200 dark:border-blue-800/80 shadow-xs">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                              <span className="font-bold text-xs text-slate-900 dark:text-white">
+                                {labReport.laboratoryName || 'Diagnostic Laboratory'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-600 dark:text-neutral-300 mt-0.5">
+                              {labReport.accreditation || 'Accredited Pathology Laboratory'} {labReport.reportDate ? `• ${labReport.reportDate}` : ''}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLabReport(null);
+                              setShowLabOcrDetails(false);
+                            }}
+                            className="text-[10px] text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                            title="Remove lab report"
+                          >
+                            Clear
+                          </button>
+                        </div>
+
+                        {/* Overall Pathologist Impression */}
+                        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-neutral-800 flex flex-col gap-1 text-[11px]">
+                          <span className="font-semibold text-slate-700 dark:text-neutral-300">
+                            Pathologist Impression:
+                          </span>
+                          <p className="text-slate-600 dark:text-neutral-300 italic">
+                            &ldquo;{labReport.overallImpression}&rdquo;
+                          </p>
+                        </div>
+
+                        {/* Abnormal Findings Badges */}
+                        {labReport.abnormalFindings && labReport.abnormalFindings.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-slate-100 dark:border-neutral-800 space-y-1">
+                            <span className="text-[10px] font-bold text-rose-700 dark:text-rose-300 uppercase tracking-wider block">
+                              Abnormal Parameter Highlights:
+                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              {labReport.abnormalFindings.map((finding, idx) => (
+                                <span
+                                  key={idx}
+                                  className="px-2 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-900/60"
+                                >
+                                  {finding}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Toggle Detailed Tests Table */}
+                        <button
+                          type="button"
+                          onClick={() => setShowLabOcrDetails(!showLabOcrDetails)}
+                          className="mt-2 text-[11px] font-semibold text-blue-700 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          {showLabOcrDetails ? 'Hide Test Table' : `View ${labReport.tests?.length || 0} Test Parameters & Reference Ranges`} &rarr;
+                        </button>
+
+                        {/* Detailed Tests Table */}
+                        {showLabOcrDetails && (
+                          <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-neutral-800 space-y-1.5">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                              Extracted Test Parameters & Biomarkers:
+                            </span>
+                            <div className="overflow-x-auto max-h-56 overflow-y-auto rounded-lg border border-slate-100 dark:border-neutral-800">
+                              <table className="w-full text-left text-[11px]">
+                                <thead className="bg-slate-50 dark:bg-neutral-800 text-slate-600 dark:text-neutral-400 text-[10px] sticky top-0 font-semibold">
+                                  <tr>
+                                    <th className="p-1.5">Test Parameter</th>
+                                    <th className="p-1.5">Observed</th>
+                                    <th className="p-1.5">Reference Range</th>
+                                    <th className="p-1.5 text-right">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-neutral-800/60 bg-white dark:bg-neutral-900">
+                                  {(labReport.tests || []).map((t, idx) => (
+                                    <tr key={idx} className="hover:bg-slate-50/70 dark:hover:bg-neutral-800/40">
+                                      <td className="p-1.5 font-medium text-slate-800 dark:text-neutral-200">
+                                        {t.testName}
+                                        {t.category && (
+                                          <span className="block text-[9px] text-slate-400">{t.category}</span>
+                                        )}
+                                      </td>
+                                      <td className="p-1.5 font-mono font-bold text-slate-900 dark:text-white">
+                                        {t.observedValue} {t.unit || ''}
+                                      </td>
+                                      <td className="p-1.5 text-[10px] text-slate-500 dark:text-neutral-400 font-mono">
+                                        {t.referenceRange || '—'}
+                                      </td>
+                                      <td className="p-1.5 text-right">
+                                        <span
+                                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
+                                            t.status === 'high'
+                                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300'
+                                              : t.status === 'low'
+                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300'
+                                              : t.status === 'critical'
+                                              ? 'bg-purple-100 text-purple-900 dark:bg-purple-950/80 dark:text-purple-300 animate-pulse'
+                                              : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
+                                          }`}
+                                        >
+                                          {t.status}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => labFileInputRef.current?.click()}
+                        className="w-full py-1 text-center text-[11px] text-blue-700 dark:text-blue-400 font-semibold hover:underline cursor-pointer"
+                      >
+                        Upload another lab test report or multi-page PDF
+                      </button>
+                    </div>
+                  )}
+
+                  {labOcrError && (
+                    <div className="mt-2 p-2 rounded bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-300 text-xs flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{labOcrError}</span>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -1585,10 +2175,57 @@ export default function Home() {
                   Live Consultation Transcript
                 </h3>
               </div>
-              <span className="text-xs font-medium text-slate-500 dark:text-neutral-400">
-                {transcript.length} {transcript.length === 1 ? 'turn' : 'turns'} recorded
-              </span>
+              <div className="flex items-center gap-2">
+                {isConnected && visualState !== 'speaking' && (
+                  <span
+                    className={`text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full border transition-all ${
+                      inactivitySecondsLeft <= INACTIVITY_WARNING_SECONDS
+                        ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/70 dark:text-rose-300 animate-pulse'
+                        : inactivitySecondsLeft <= 30
+                        ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/70 dark:text-amber-300'
+                        : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-neutral-800 dark:text-neutral-400'
+                    }`}
+                    title="Consultation will auto-conclude if no response is detected within 1 minute"
+                  >
+                    ⏱️ Idle: {inactivitySecondsLeft}s
+                  </span>
+                )}
+                <span className="text-xs font-medium text-slate-500 dark:text-neutral-400">
+                  {transcript.length} {transcript.length === 1 ? 'turn' : 'turns'} recorded
+                </span>
+              </div>
             </div>
+
+            {/* Inactivity Warning Notice Banner (1 minute silence threshold) */}
+            {showInactivityWarning && isConnected && (
+              <div className="my-2 p-2.5 rounded-xl bg-amber-500/15 dark:bg-amber-950/60 border border-amber-400 dark:border-amber-600/80 text-amber-900 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2 text-xs shadow-sm animate-in fade-in slide-in-from-top-1 duration-200">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500" />
+                  </span>
+                  <span className="font-semibold">
+                    Inactivity Notice: No response detected. Auto-ending call in {inactivitySecondsLeft}s.
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={resetInactivityTimer}
+                    className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] shadow-xs cursor-pointer transition-all"
+                  >
+                    Stay on Call
+                  </button>
+                  <button
+                    type="button"
+                    onClick={disconnect}
+                    className="px-2 py-1 rounded-lg bg-slate-200 dark:bg-neutral-800 hover:bg-slate-300 dark:hover:bg-neutral-700 text-slate-700 dark:text-neutral-300 font-semibold text-[11px] cursor-pointer transition-all"
+                  >
+                    End Now
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Scrollable Conversation Turns */}
             <div
@@ -1655,7 +2292,7 @@ export default function Home() {
                           <div className="flex flex-wrap items-center gap-2">
                             <button
                               type="button"
-                              onClick={openCameraModal}
+                              onClick={() => openCameraModal('prescription')}
                               disabled={isProcessingOcr}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
                               title="Take photo in Chrome (Google Meet style)"
@@ -1683,6 +2320,64 @@ export default function Home() {
                             >
                               <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                               <span>Try Sample Prescription</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                    {/* In-conversation upload prompt when Dr. DoctoMPT asks for laboratory test report */}
+                    {item.role === 'doctor' &&
+                      !labReport &&
+                      /(lab|blood test|test report|cbc|lft|kft|pathology|investigation|blood report|sugar test)/i.test(
+                        item.text
+                      ) &&
+                      /(upload|share|camera|photo|pdf|image|dekhiye|bataiye|dekhbo)/i.test(item.text) && (
+                        <div className="mt-2.5 p-3 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-teal-500/5 dark:from-blue-500/20 dark:via-indigo-500/15 dark:to-teal-500/10 border border-blue-300 dark:border-blue-700/70 shadow-sm max-w-[95%] animate-in fade-in slide-in-from-top-2 duration-300">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="relative flex h-2.5 w-2.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
+                            </span>
+                            <span className="text-xs font-bold text-blue-950 dark:text-blue-200">
+                              Dr. DoctoMPT requested your laboratory reports & diagnostic tests:
+                            </span>
+                          </div>
+
+                          <p className="text-[11px] text-slate-600 dark:text-neutral-300 mb-2.5 leading-relaxed">
+                            Snap a picture directly with your camera, upload a PDF/image, or test a sample CBC report.
+                          </p>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openCameraModal('lab')}
+                              disabled={isProcessingLabOcr}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                              title="Take lab report photo in Chrome"
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>Take Photo</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => labFileInputRef.current?.click()}
+                              disabled={isProcessingLabOcr}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-neutral-900 border border-blue-300 dark:border-blue-700/60 hover:bg-blue-50 dark:hover:bg-neutral-800 text-blue-800 dark:text-blue-200 font-semibold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <UploadCloud className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                              <span>Upload Lab PDF / Image</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={loadSampleLabReport}
+                              disabled={isProcessingLabOcr}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:hover:bg-amber-900/50 border border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-200 font-semibold text-xs transition-all cursor-pointer disabled:opacity-50"
+                              title="Load realistic Dr Lal PathLabs CBC report"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                              <span>Try Sample CBC Report</span>
                             </button>
                           </div>
                         </div>
@@ -1721,15 +2416,15 @@ export default function Home() {
                     <div className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-2xl p-1.5 shadow-xl z-40 flex flex-col gap-1 text-xs">
                       <button
                         type="button"
-                        onClick={openCameraModal}
+                        onClick={() => openCameraModal('prescription')}
                         className="w-full p-2 rounded-xl hover:bg-teal-50 dark:hover:bg-teal-950/50 text-left transition-colors flex items-center gap-2.5 text-slate-800 dark:text-neutral-200 cursor-pointer"
                       >
                         <div className="w-7 h-7 rounded-lg bg-teal-100 dark:bg-teal-900/50 flex items-center justify-center shrink-0 text-teal-700 dark:text-teal-300">
                           <Camera className="w-4 h-4" />
                         </div>
                         <div>
-                          <span className="font-semibold block text-slate-900 dark:text-white">Take Live Photo</span>
-                          <span className="text-[10px] text-slate-500 dark:text-neutral-400">Chrome in-browser camera (like Meet)</span>
+                          <span className="font-semibold block text-slate-900 dark:text-white">Scan Prescription</span>
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400">Live doctor handwriting camera</span>
                         </div>
                       </button>
 
@@ -1741,12 +2436,45 @@ export default function Home() {
                         }}
                         className="w-full p-2 rounded-xl hover:bg-teal-50 dark:hover:bg-teal-950/50 text-left transition-colors flex items-center gap-2.5 text-slate-800 dark:text-neutral-200 cursor-pointer"
                       >
-                        <div className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center shrink-0 text-blue-700 dark:text-blue-300">
+                        <div className="w-7 h-7 rounded-lg bg-teal-100 dark:bg-teal-900/50 flex items-center justify-center shrink-0 text-teal-700 dark:text-teal-300">
                           <UploadCloud className="w-4 h-4" />
                         </div>
                         <div>
-                          <span className="font-semibold block text-slate-900 dark:text-white">Upload PDF or Image</span>
-                          <span className="text-[10px] text-slate-500 dark:text-neutral-400">Multi-page PDF or photo file</span>
+                          <span className="font-semibold block text-slate-900 dark:text-white">Upload Prescription</span>
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400">Doctor slip (PDF or image)</span>
+                        </div>
+                      </button>
+
+                      <div className="my-1 border-t border-slate-100 dark:border-neutral-800" />
+
+                      <button
+                        type="button"
+                        onClick={() => openCameraModal('lab')}
+                        className="w-full p-2 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-950/50 text-left transition-colors flex items-center gap-2.5 text-slate-800 dark:text-neutral-200 cursor-pointer"
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center shrink-0 text-blue-700 dark:text-blue-300">
+                          <Microscope className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="font-semibold block text-slate-900 dark:text-white">Scan Lab Test Report</span>
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400">Live camera for blood & lab tests</span>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCaptureMenuOpen(false);
+                          labFileInputRef.current?.click();
+                        }}
+                        className="w-full p-2 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-950/50 text-left transition-colors flex items-center gap-2.5 text-slate-800 dark:text-neutral-200 cursor-pointer"
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center shrink-0 text-blue-700 dark:text-blue-300">
+                          <FlaskConical className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="font-semibold block text-slate-900 dark:text-white">Upload Lab Report</span>
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400">CBC, LFT, KFT (PDF or image)</span>
                         </div>
                       </button>
                     </div>
@@ -2226,14 +2954,44 @@ export default function Home() {
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
             {/* Modal Header */}
-            <div className="p-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/90">
+            <div className="p-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/90 gap-2">
               <div className="flex items-center gap-2">
-                <Camera className="w-4 h-4 text-teal-400" />
-                <h3 className="text-sm font-bold text-white">Live Prescription Scanner</h3>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 font-semibold">
-                  In-Browser Camera
-                </span>
+                {cameraDocTarget === 'lab' ? (
+                  <Microscope className="w-4 h-4 text-blue-400" />
+                ) : (
+                  <Camera className="w-4 h-4 text-teal-400" />
+                )}
+                <h3 className="text-sm font-bold text-white">
+                  {cameraDocTarget === 'lab' ? 'Live Lab Report Scanner' : 'Live Prescription Scanner'}
+                </h3>
               </div>
+
+              {/* Document Target Selector Pill */}
+              <div className="flex items-center gap-1 bg-neutral-800 p-0.5 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setCameraDocTarget('prescription')}
+                  className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                    cameraDocTarget === 'prescription'
+                      ? 'bg-teal-600 text-white shadow-xs'
+                      : 'text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  Doctor Rx
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCameraDocTarget('lab')}
+                  className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                    cameraDocTarget === 'lab'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  Lab Report
+                </button>
+              </div>
+
               <button
                 type="button"
                 onClick={closeCameraModal}
@@ -2254,13 +3012,13 @@ export default function Home() {
                 className="w-full h-full object-cover max-h-[440px]"
               />
 
-              {/* Prescription Framing Guide Overlay */}
-              <div className="absolute inset-6 sm:inset-8 border-2 border-dashed border-teal-400/80 rounded-2xl pointer-events-none flex flex-col items-center justify-between p-3">
-                <span className="text-[11px] font-semibold tracking-wide uppercase px-2.5 py-1 rounded-full bg-black/70 text-teal-300 backdrop-blur-xs border border-teal-500/30">
-                  Align Prescription Inside Frame
+              {/* Document Framing Guide Overlay */}
+              <div className={`absolute inset-6 sm:inset-8 border-2 border-dashed ${cameraDocTarget === 'lab' ? 'border-blue-400/80' : 'border-teal-400/80'} rounded-2xl pointer-events-none flex flex-col items-center justify-between p-3`}>
+                <span className={`text-[11px] font-semibold tracking-wide uppercase px-2.5 py-1 rounded-full bg-black/70 ${cameraDocTarget === 'lab' ? 'text-blue-300 border-blue-500/30' : 'text-teal-300 border-teal-500/30'} backdrop-blur-xs border`}>
+                  Align {cameraDocTarget === 'lab' ? 'Lab Test Report' : 'Prescription'} Inside Frame
                 </span>
                 <span className="text-[10px] text-neutral-300 bg-black/70 px-2 py-0.5 rounded backdrop-blur-xs">
-                  Pharmacist-Grade Handwriting OCR
+                  {cameraDocTarget === 'lab' ? 'Biomedical & Pathology Test OCR' : 'Pharmacist-Grade Handwriting OCR'}
                 </span>
               </div>
 
@@ -2269,27 +3027,31 @@ export default function Home() {
                   <AlertTriangle className="w-8 h-8 text-rose-400 mb-1" />
                   <p className="font-semibold">{cameraError}</p>
                   <p className="text-[11px] text-neutral-400 max-w-xs mt-1">
-                    Camera may be busy in another app or denied permission. You can upload an image directly or use a sample slip.
+                    Camera may be busy in another app or denied permission. You can upload an image directly or use a sample {cameraDocTarget === 'lab' ? 'lab report' : 'slip'}.
                   </p>
                   <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
                     <button
                       type="button"
                       onClick={() => {
                         closeCameraModal();
-                        fileInputRef.current?.click();
+                        if (cameraDocTarget === 'lab') {
+                          labFileInputRef.current?.click();
+                        } else {
+                          fileInputRef.current?.click();
+                        }
                       }}
-                      className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      className={`px-3.5 py-2 rounded-xl ${cameraDocTarget === 'lab' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-teal-600 hover:bg-teal-500'} text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs`}
                     >
                       <UploadCloud className="w-3.5 h-3.5" />
                       <span>Upload Image File</span>
                     </button>
                     <button
                       type="button"
-                      onClick={loadSamplePrescription}
+                      onClick={cameraDocTarget === 'lab' ? loadSampleLabReport : loadSamplePrescription}
                       className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
-                      <span>Load Sample Slip</span>
+                      <span>Load Sample {cameraDocTarget === 'lab' ? 'Report' : 'Slip'}</span>
                     </button>
                   </div>
                 </div>
@@ -2313,7 +3075,11 @@ export default function Home() {
                   type="button"
                   onClick={() => {
                     closeCameraModal();
-                    fileInputRef.current?.click();
+                    if (cameraDocTarget === 'lab') {
+                      labFileInputRef.current?.click();
+                    } else {
+                      fileInputRef.current?.click();
+                    }
                   }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium transition-colors cursor-pointer"
                   title="Camera busy? Pick an image from device"
@@ -2324,9 +3090,9 @@ export default function Home() {
 
                 <button
                   type="button"
-                  onClick={loadSamplePrescription}
+                  onClick={cameraDocTarget === 'lab' ? loadSampleLabReport : loadSamplePrescription}
                   className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-amber-300 text-xs font-medium transition-colors cursor-pointer"
-                  title="Test sample prescription without camera"
+                  title={`Test sample ${cameraDocTarget === 'lab' ? 'lab report' : 'prescription'} without camera`}
                 >
                   <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                   <span className="hidden sm:inline">Sample</span>
@@ -2338,7 +3104,7 @@ export default function Home() {
                 type="button"
                 onClick={capturePhotoAndScan}
                 disabled={!!cameraError}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white font-bold text-xs sm:text-sm shadow-lg shadow-teal-500/25 active:scale-95 transition-all cursor-pointer disabled:opacity-40"
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-full ${cameraDocTarget === 'lab' ? 'bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 shadow-blue-500/25' : 'bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 shadow-teal-500/25'} text-white font-bold text-xs sm:text-sm shadow-lg active:scale-95 transition-all cursor-pointer disabled:opacity-40`}
               >
                 <Camera className="w-4 h-4" />
                 <span>Capture & Scan</span>
