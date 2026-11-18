@@ -138,14 +138,33 @@ export function synthesizeFallbackPrescription(
     },
   ];
 
+  const recommendedTests: string[] = [];
+  if (hasFever && hasThroat) {
+    recommendedTests.push('Complete Blood Count (CBC) with Differential');
+    recommendedTests.push('Chest X-Ray (PA view, if persistent cough > 3 days)');
+    recommendedTests.push('Influenza / Viral Respiratory Panel');
+  } else if (hasFever) {
+    recommendedTests.push('Complete Blood Count (CBC) with Differential & ESR');
+    recommendedTests.push('Dengue NS1 Antigen & Widal Serology (if fever > 48 hours)');
+    recommendedTests.push('Routine Urine Examination');
+  } else if (hasStomach) {
+    recommendedTests.push('Stool Routine & Occult Blood Examination');
+    recommendedTests.push('Liver Function Test (LFT) & Serum Amylase');
+    recommendedTests.push('Ultrasound Whole Abdomen (if abdominal pain persists)');
+  } else {
+    recommendedTests.push('Complete Blood Count (CBC)');
+    recommendedTests.push('Routine Clinical Vitals Monitoring (Blood Pressure, SpO2, Temperature)');
+  }
+
   return {
     patientName: detectedName,
     patientAge: detectedAge,
     date: new Date().toISOString().split('T')[0],
     chiefComplaint: chiefComplaints.join(', '),
     assessmentNotes:
-      'Patient presented with acute symptoms consistent with mild viral/upper respiratory syndrome or tension cephalea. Vital signs stable in virtual triage. Recommended supportive pharmacological therapy with hydration and rest.',
+      'Patient presented with acute symptoms consistent with mild viral/upper respiratory syndrome or tension cephalea. Vital signs stable in virtual triage. Recommended supportive pharmacological therapy with hydration, rest, and targeted diagnostic testing.',
     medications: medications.map(normalizeMedication),
+    recommendedTests,
     advice: [
       'Ensure 8 to 10 hours of uninterrupted bed rest to allow your immune system to recover.',
       'Stay thoroughly hydrated by drinking warm fluids, herbal teas, or broths throughout the day.',

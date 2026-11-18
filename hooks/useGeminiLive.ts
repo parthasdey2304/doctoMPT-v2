@@ -292,7 +292,37 @@ export function useGeminiLive({
         httpOptions: { apiVersion: 'v1alpha' },
       });
 
-      // 4. Connect to Live Session
+      // 4. Pre-fetch Clinic EMR Database History so Dr. DoctoMPT accesses past records for returning patients (e.g. Alex)
+      let databaseHistoryContext = '';
+      try {
+        const histRes = await fetch('/api/save-consultation');
+        if (histRes.ok) {
+          const histData = await histRes.json();
+          if (Array.isArray(histData.consultations) && histData.consultations.length > 0) {
+            const recordsSummary = histData.consultations
+              .slice(0, 5)
+              .map((c: any) => {
+                const rxMeds = c.prescription?.medications
+                  ? c.prescription.medications.map((m: any) => `${m.brandName || m.name} (${m.dosage || ''})`).join(', ')
+                  : 'None';
+                const rxTests = c.prescription?.recommendedTests
+                  ? c.prescription.recommendedTests.join(', ')
+                  : 'None';
+                return `- Patient: "${c.patientName}" (Age: ${c.patientAge}), Date: ${c.createdAt?.split('T')[0] || 'Previous'}. Chief Complaint: ${c.chiefComplaint || c.primaryCondition}. Clinical Diagnosis: ${c.clinicalImpression || c.doctorNotes || 'Assessed'}. Prescribed Regimen: [${rxMeds}]. Tests Ordered: [${rxTests}].`;
+              })
+              .join('\n');
+            databaseHistoryContext = `\n\n[CLINIC ELECTRONIC HEALTH RECORDS (EHR) DATABASE]:
+The clinic database has recorded the following past patient consultations:
+${recordsSummary}
+
+RETURNING PATIENT ACCESS RULE: When a patient identifies themselves (e.g. Alex) or states that they have consulted with you before or visited the clinic a week or two ago, immediately recognize them! Actively reference their previous diagnosis, earlier medications, and test results from the database above. Inquire warmly about their progress and whether their earlier symptoms resolved or new ones have arisen.`;
+          }
+        }
+      } catch (histErr) {
+        console.warn('[Gemini Live] Prior database history notice:', histErr);
+      }
+
+      // 5. Connect to Live Session
       const session = await ai.live.connect({
         model: 'gemini-3.8-live',
         config: {
@@ -305,7 +335,7 @@ export function useGeminiLive({
             },
           },
           systemInstruction: {
-            parts: [{ text: customSystemInstruction }],
+            parts: [{ text: `${customSystemInstruction}${databaseHistoryContext}` }],
           },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -373,6 +403,24 @@ export function useGeminiLive({
             if (content.turnComplete || content.generationComplete) {
               if (currentUserTurnRef.current.trim()) {
                 const userTurnText = currentUserTurnRef.current.trim();
+
+                // Extract patient name & age if spoken during consultation
+                const nameMatch = userTurnText.match(
+                  /(?:my name is|i am|i'm|name:?)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i
+                );
+                if (
+                  nameMatch &&
+                  nameMatch[1] &&
+                  !nameMatch[1].toLowerCase().includes('doctor')
+                ) {
+                  setPatientName(nameMatch[1].trim());
+                }
+
+                const ageMatch = userTurnText.match(/(\d{1,2})\s*(?:years|yrs|year old|yo)/i);
+                if (ageMatch && ageMatch[1]) {
+                  setPatientAge(ageMatch[1]);
+                }
+
                 setTranscript((prev) => {
                   const last = prev[prev.length - 1];
                   if (last && last.role === 'patient') {
@@ -584,102 +632,9 @@ export function useGeminiLive({
 
         sourceNode.connect(workletNode);
 
-        // 6. Speech-to-Text Recognition for instant transcription & response guarantee
-        if (typeof window !== 'undefined') {
-          const SpeechRec =
-            (window as any).SpeechRecognition ||
-            (window as any).webkitSpeechRecognition;
-
-          if (SpeechRec) {
-            try {
-              const recognition = new SpeechRec();
-              recognition.continuous = true;
-              recognition.interimResults = true;
-              recognition.lang =
-                consultationLanguage === 'hinglish'
-                  ? 'hi-IN'
-                  : consultationLanguage === 'benglish'
-                  ? 'bn-IN'
-                  : 'en-US';
-
-              recognition.onresult = (event: any) => {
-                // Ignore speech recognition while doctor is speaking to prevent speaker echo feedback
-                if (isMutedRef.current || isDoctorSpeakingRef.current) return;
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                  const res = event.results[i];
-                  const spokenText = res[0].transcript.trim();
-
-                  if (res.isFinal && spokenText) {
-                    console.log('[Voice Recognition] Patient said:', spokenText);
-
-                    // Check for patient name and age in speech
-                    const nameMatch = spokenText.match(
-                      /(?:my name is|i am|i'm|name:?)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i
-                    );
-                    if (
-                      nameMatch &&
-                      nameMatch[1] &&
-                      !nameMatch[1].toLowerCase().includes('doctor')
-                    ) {
-                      setPatientName(nameMatch[1].trim());
-                    }
-
-                    const ageMatch = spokenText.match(/(\d{1,2})\s*(?:years|yrs|year old|yo)/i);
-                    if (ageMatch && ageMatch[1]) {
-                      setPatientAge(ageMatch[1]);
-                    }
-
-                    // Add patient turn to transcript cleanly without duplicates
-                    setTranscript((prev) => {
-                      const last = prev[prev.length - 1];
-                      if (last && last.role === 'patient') {
-                        const normLast = last.text.trim().toLowerCase();
-                        const normSpoken = spokenText.trim().toLowerCase();
-                        if (normLast === normSpoken || normLast.includes(normSpoken) || normSpoken.includes(normLast)) {
-                          return prev;
-                        }
-                      }
-                      return [
-                        ...prev,
-                        {
-                          id: `turn_${Date.now()}_patient_voice`,
-                          role: 'patient',
-                          text: spokenText,
-                          timestamp: new Date().toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          }),
-                        },
-                      ];
-                    });
-                    setStatusText('Doctor listening...');
-                  } else if (!res.isFinal && spokenText) {
-                    // Show live interim words as the user speaks
-                    setStatusText(`Hearing: "${spokenText}"`);
-                  }
-                }
-              };
-
-              recognition.onerror = (e: any) => {
-                console.warn('[Voice Recognition] Notice:', e?.error);
-              };
-
-              recognition.onend = () => {
-                // Auto-restart if session is still alive
-                if (recognitionRef.current && sessionRef.current) {
-                  try {
-                    recognition.start();
-                  } catch (e) {}
-                }
-              };
-
-              recognition.start();
-              recognitionRef.current = recognition;
-            } catch (recErr) {
-              console.warn('[Voice Recognition] Could not start speech recognition:', recErr);
-            }
-          }
-        }
+        // Native WebSocket Input Transcription:
+        // Gemini Live directly receives 16kHz PCM audio via workletNode and transcribes patient speech natively
+        // via inputAudioTranscription with server-side echo cancellation, avoiding laptop speaker audio loopback.
       } catch (micErr: any) {
         console.warn(
           '[Gemini Live] Microphone access could not be acquired:',
@@ -1118,6 +1073,7 @@ export function useGeminiLive({
     isConnecting,
     isMuted,
     statusText,
+    setStatusText,
     visualState,
     micLevel,
     speakerLevel,

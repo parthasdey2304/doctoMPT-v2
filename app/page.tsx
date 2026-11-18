@@ -146,6 +146,7 @@ export default function Home() {
     isConnecting,
     isMuted,
     statusText,
+    setStatusText,
     visualState,
     micLevel,
     speakerLevel,
@@ -504,6 +505,19 @@ export default function Home() {
       } catch (autoSaveErr) {
         console.warn('Auto-save to Supabase failed:', autoSaveErr);
       }
+
+      // Automatically exit and disconnect consultation mode after prescription is generated
+      disconnect();
+      resetInactivityTimer();
+      setTranscript((curr) => [
+        ...curr,
+        {
+          id: `turn_${Date.now()}_doctor_conclude`,
+          role: 'doctor',
+          text: 'Your official medical prescription has been prepared and downloaded. Our consultation is now officially concluded. Take care and get well soon!',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
     } catch (err: any) {
       console.error('Prescription generation failed:', err);
       setPrescriptionError(formatErrorMessage(err));
@@ -524,6 +538,9 @@ export default function Home() {
     systemInstruction,
     selectedLanguage,
     selectedVoice,
+    disconnect,
+    resetInactivityTimer,
+    setTranscript,
   ]);
 
   const autoTriggeredRxRef = useRef(false);
@@ -2509,7 +2526,7 @@ export default function Home() {
                     Medical Prescription (Rx) Generator
                   </h3>
                   <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/50 px-2 py-0.5 rounded-md font-semibold">
-                    gemini-3.5-flash-lite
+                    gemini-2.5-flash
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-neutral-400 mt-0.5">
@@ -2651,6 +2668,21 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* Recommended Diagnostic Tests & Lab Investigations */}
+                {prescription.recommendedTests && prescription.recommendedTests.length > 0 && (
+                  <div className="mt-3 p-3.5 rounded-lg bg-slate-100/90 dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 text-xs shadow-xs">
+                    <span className="font-bold text-slate-900 dark:text-white block mb-1.5 flex items-center gap-1.5">
+                      <Microscope className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                      Recommended Diagnostic Tests & Investigations:
+                    </span>
+                    <ul className="list-disc list-inside space-y-1 text-slate-700 dark:text-neutral-300">
+                      {prescription.recommendedTests.map((test, i) => (
+                        <li key={i}>{test}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 {/* Supportive Advice & Follow-Up */}
                 <div className="mt-3 p-3.5 rounded-lg bg-teal-50/70 dark:bg-teal-950/20 border border-teal-200/80 dark:border-teal-800/30 text-xs shadow-xs">
                   <span className="font-bold text-teal-800 dark:text-teal-300 block mb-1">
@@ -2687,6 +2719,20 @@ export default function Home() {
 
                 {/* Action Buttons for the Rx */}
                 <div className="mt-4 flex flex-wrap items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-neutral-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPrescription(null);
+                      autoTriggeredRxRef.current = false;
+                      setTranscript([]);
+                      setStatusText('Ready for new consultation. Previous medical history is stored in the database.');
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Start New Consultation</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => generatePrescriptionPdf(prescription, true)}

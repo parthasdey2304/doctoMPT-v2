@@ -24,6 +24,7 @@ export interface PrescriptionData {
   chiefComplaint: string;
   assessmentNotes: string;
   medications: MedicationItem[];
+  recommendedTests?: string[];
   advice: string[];
   followUp: string;
   doctorName?: string;

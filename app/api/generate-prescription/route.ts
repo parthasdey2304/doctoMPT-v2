@@ -4,6 +4,12 @@ import { PrescriptionData } from '@/types/consultation';
 import { formatErrorMessage } from '@/lib/error-utils';
 import { synthesizeFallbackPrescription } from '@/lib/prescription-fallback';
 import { normalizeMedication } from '@/lib/medication-utils';
+import * as fs from 'fs';
+import * as path from 'path';
+
+function formattedTranscriptSnippet(transcript: Array<{ role: 'patient' | 'doctor'; text: string }>): string {
+  return transcript.map((t) => t.text.toLowerCase()).join(' ');
+}
 
 export async function POST(req: NextRequest) {
   let transcript: Array<{ role: 'patient' | 'doctor'; text: string }> = [];
@@ -16,10 +22,44 @@ export async function POST(req: NextRequest) {
       transcript?: Array<{ role: 'patient' | 'doctor'; text: string }>;
       patientName?: string;
       patientAge?: string | number;
+      historyContext?: string;
     };
     transcript = parsedBody.transcript || [];
     patientName = parsedBody.patientName;
     patientAge = parsedBody.patientAge;
+    let historyContext = parsedBody.historyContext || '';
+
+    // Database access: Retrieve prior consultations for returning patients (e.g. Alex) from the clinic database
+    if (!historyContext) {
+      try {
+        const dbPath = path.join(process.cwd(), '.data', 'consultations.json');
+        if (fs.existsSync(dbPath)) {
+          const raw = fs.readFileSync(dbPath, 'utf8');
+          const allConsultations = JSON.parse(raw || '[]');
+          const patientNameLower = (patientName || '').toLowerCase().trim();
+          const matches = allConsultations.filter((c: any) => {
+            if (!c.patientName) return false;
+            const cName = c.patientName.toLowerCase().trim();
+            return (
+              (patientNameLower && patientNameLower !== 'patient' && cName.includes(patientNameLower)) ||
+              (cName.length > 2 && formattedTranscriptSnippet(transcript).includes(cName))
+            );
+          });
+
+          if (matches.length > 0) {
+            historyContext = matches
+              .slice(-3)
+              .map(
+                (m: any) =>
+                  `- Past Visit (${m.createdAt || 'Previous'}): Condition "${m.chiefComplaint || m.primaryCondition}", Diagnosis "${m.clinicalImpression || m.doctorNotes}", Previous Meds: [${m.prescription?.medications?.map((x: any) => x.brandName || x.name).join(', ') || 'None'}], Previous Tests: [${m.prescription?.recommendedTests?.join(', ') || 'None'}]`
+              )
+              .join('\n');
+          }
+        }
+      } catch (dbErr) {
+        // Fallback silently if db not ready
+      }
+    }
 
     if (!transcript || !Array.isArray(transcript) || transcript.length === 0) {
       return NextResponse.json(
@@ -54,7 +94,9 @@ export async function POST(req: NextRequest) {
 Your task is to review the doctor-patient consultation transcript, extract patient details, and generate a precise, professional structured clinical medical prescription JSON.
 
 RULES:
+- STRICT LANGUAGE REQUIREMENT: Regardless of the language spoken in the consultation (whether Hinglish, Benglish, Hindi, or English), the ENTIRE prescription JSON—including chiefComplaint, assessmentNotes, medication reasons, instructions, recommendedTests, advice, and followUp—MUST BE WRITTEN EXCLUSIVELY IN PROFESSIONAL CLINICAL ENGLISH.
 - Extract or deduce the patient's name and age from the transcript. If not mentioned, use "${patientName || 'Patient'}" and "${patientAge ? String(patientAge) : '32 years'}".
+- RECOMMENDED DIAGNOSTIC TESTS: You MUST include 2 to 4 clinically indicated diagnostic laboratory tests or medical investigations (e.g. Complete Blood Count (CBC) with Differential, Dengue NS1 / Widal serology, Chest X-Ray PA view, Routine Urine, Liver Function Test (LFT), Fasting Blood Sugar) tailored to the patient's symptoms, especially if no tests were performed or if their physical doctor did not order tests.
 - Always provide 2 to 4 relevant, standard clinical medications matching the symptoms discussed.
 - For EVERY medication entry, you MUST explicitly provide:
   * brandName: The real, widely-prescribed commercial brand / medicine name (e.g., Dolo 650, Pan 40, Zyrtec, Augmentin 625, Allegra 120, Electral ORS, Combiflam, Azithral 500).
@@ -88,11 +130,11 @@ RULES:
         },
         chiefComplaint: {
           type: Type.STRING,
-          description: 'Concise summary of patient symptoms and complaints',
+          description: 'Concise summary of patient symptoms and complaints in English',
         },
         assessmentNotes: {
           type: Type.STRING,
-          description: 'Brief clinical diagnosis and triage impression',
+          description: 'Brief clinical diagnosis and triage impression in English',
         },
         medications: {
           type: Type.ARRAY,
@@ -116,8 +158,8 @@ RULES:
               frequency: { type: Type.STRING, description: 'Frequency (e.g., 2 times a day)' },
               timing: { type: Type.STRING, description: 'Timing (e.g., After meals)' },
               duration: { type: Type.STRING, description: 'Duration (e.g., 5 days)' },
-              reason: { type: Type.STRING, description: 'Clinical reason for prescription' },
-              instructions: { type: Type.STRING, description: 'Special instructions' },
+              reason: { type: Type.STRING, description: 'Clinical reason for prescription in English' },
+              instructions: { type: Type.STRING, description: 'Special instructions in English' },
             },
             required: [
               'brandName',
@@ -132,14 +174,19 @@ RULES:
             ],
           },
         },
+        recommendedTests: {
+          type: Type.ARRAY,
+          description: '2 to 4 recommended laboratory diagnostic tests and medical investigations in English',
+          items: { type: Type.STRING },
+        },
         advice: {
           type: Type.ARRAY,
-          description: '3-4 practical recovery/care recommendations',
+          description: '3-4 practical recovery/care recommendations in English',
           items: { type: Type.STRING },
         },
         followUp: {
           type: Type.STRING,
-          description: 'Follow-up timeline and clinical guidance',
+          description: 'Follow-up timeline and clinical guidance in English',
         },
       },
       required: [
@@ -149,12 +196,17 @@ RULES:
         'chiefComplaint',
         'assessmentNotes',
         'medications',
+        'recommendedTests',
         'advice',
         'followUp',
       ],
     };
 
     // Millisecond generation with 3.5s timeout: if model takes longer, immediately use local synthesizer
+    const promptText = `Please generate the structured prescription in professional English based on this consultation transcript:\n\n${formattedTranscript}\n\nToday's date is ${todayStr}.${
+      historyContext ? `\n\nPatient Prior Medical History from Database:\n${historyContext}` : ''
+    }`;
+
     const generatePromise = ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [
@@ -162,7 +214,7 @@ RULES:
           role: 'user',
           parts: [
             {
-              text: `Please generate the structured prescription based on this consultation transcript:\n\n${formattedTranscript}\n\nToday's date is ${todayStr}.`,
+              text: promptText,
             },
           ],
         },

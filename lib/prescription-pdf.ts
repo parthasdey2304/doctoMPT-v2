@@ -282,7 +282,45 @@ export function generatePrescriptionPdf(
     y += rowHeight;
   });
 
-  y += 5;
+  y += 4;
+
+  // Recommended Diagnostic Tests & Lab Investigations Section
+  const testsList =
+    prescription.recommendedTests && prescription.recommendedTests.length > 0
+      ? prescription.recommendedTests.slice(0, 4)
+      : [
+          'Complete Blood Count (CBC) with Differential',
+          'Routine Clinical Vitals Monitoring (Blood Pressure, SpO2, Temperature)',
+        ];
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  const wrappedTestItems = testsList.map((t) =>
+    doc.splitTextToSize(`[ ]  ${t}`, contentWidth - 8)
+  );
+  const totalTestLines = wrappedTestItems.reduce((acc, lines) => acc + lines.length, 0);
+  const testBoxHeight = Math.max(16, 7 + totalTestLines * 3.5);
+
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.setDrawColor(203, 213, 225); // slate-300
+  doc.roundedRect(margin, y, contentWidth, testBoxHeight, 1.5, 1.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 41, 59); // slate-800
+  doc.text('RECOMMENDED DIAGNOSTIC TESTS & LAB INVESTIGATIONS', margin + 4, y + 4.8);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  doc.setTextColor(51, 65, 85);
+
+  let curTestY = y + 8.5;
+  wrappedTestItems.forEach((lines) => {
+    doc.text(lines, margin + 4, curTestY);
+    curTestY += lines.length * 3.5;
+  });
+
+  y += testBoxHeight + 3.5;
 
   // Supportive Care & Lifestyle Advice Box
   const adviceList =

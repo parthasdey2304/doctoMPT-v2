@@ -13,6 +13,7 @@ import {
   getSimulatedGreeting,
   shouldAutoTriggerRx,
 } from '../lib/constants';
+import { synthesizeFallbackPrescription } from '../lib/prescription-fallback';
 
 describe('Doctor Consultation Flow & Protocol Guidelines', () => {
   test('DEFAULT_DOCTOR_VOICE is configured to mature male doctor (Charon)', () => {
@@ -31,6 +32,18 @@ describe('Doctor Consultation Flow & Protocol Guidelines', () => {
   test('DEFAULT_DOCTOR_SYSTEM_INSTRUCTION contains name/age greeting prompt requirement', () => {
     expect(DEFAULT_DOCTOR_SYSTEM_INSTRUCTION).toContain('Dr. DoctoMPT');
     expect(DEFAULT_DOCTOR_SYSTEM_INSTRUCTION.toLowerCase()).toContain('name and age');
+  });
+
+  test('DEFAULT_DOCTOR_SYSTEM_INSTRUCTION enforces mandatory physical doctor triage inquiry', () => {
+    expect(DEFAULT_DOCTOR_SYSTEM_INSTRUCTION).toContain('PHYSICAL DOCTOR CONSULTATION');
+    expect(DEFAULT_DOCTOR_SYSTEM_INSTRUCTION.toLowerCase()).toContain('physical doctor');
+    expect(DEFAULT_DOCTOR_SYSTEM_INSTRUCTION.toLowerCase()).toContain('prescription upload');
+  });
+
+  test('DEFAULT_DOCTOR_SYSTEM_INSTRUCTION enforces mandatory laboratory tests inquiry & ordering', () => {
+    expect(DEFAULT_DOCTOR_SYSTEM_INSTRUCTION).toContain('LABORATORY TESTS & DIAGNOSTIC REPORTS');
+    expect(DEFAULT_DOCTOR_SYSTEM_INSTRUCTION.toLowerCase()).toContain('blood tests');
+    expect(DEFAULT_DOCTOR_SYSTEM_INSTRUCTION.toLowerCase()).toContain('recommended diagnostic tests');
   });
 
   test('DEFAULT_DOCTOR_SYSTEM_INSTRUCTION contains explicit wrap-up questions and Rx offer', () => {
@@ -283,6 +296,26 @@ describe('Doctor Consultation Flow & Protocol Guidelines', () => {
     test('returns false for empty or single-turn transcripts', () => {
       expect(shouldAutoTriggerRx([])).toBe(false);
       expect(shouldAutoTriggerRx([{ role: 'doctor', text: 'Hello' }])).toBe(false);
+    });
+  });
+
+  describe('Fallback Clinical Prescription Synthesizer', () => {
+    test('synthesizes prescription in strictly English with recommended diagnostic tests', () => {
+      const transcript = [
+        { role: 'doctor' as const, text: 'Hello, what symptoms are you having?' },
+        { role: 'patient' as const, text: 'I have a high fever and bad cough for 3 days.' },
+      ];
+      const rx = synthesizeFallbackPrescription(transcript, 'Alex', '28 years');
+
+      expect(rx.patientName).toBe('Alex');
+      expect(rx.chiefComplaint.toLowerCase()).toContain('fever');
+      expect(rx.medications.length).toBeGreaterThan(1);
+      expect(Array.isArray(rx.recommendedTests)).toBe(true);
+      expect(rx.recommendedTests!.length).toBeGreaterThan(0);
+      expect(rx.recommendedTests![0]).toContain('CBC');
+      expect(rx.assessmentNotes).toContain('acute symptoms');
+      expect(rx.advice.length).toBeGreaterThan(2);
+      expect(rx.followUp).toBeDefined();
     });
   });
 });

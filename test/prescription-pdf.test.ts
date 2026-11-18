@@ -304,4 +304,40 @@ describe('Prescription PDF Generator', () => {
     expect(pdfOutput).toContain('Ref: RX-MWL3FWAQ');
     expect(pdfOutput).not.toContain('Ref: Ref:');
   });
+
+  test('successfully renders RECOMMENDED DIAGNOSTIC TESTS & LAB INVESTIGATIONS on PDF', () => {
+    const rxWithTests: PrescriptionData = {
+      patientName: 'Alex',
+      patientAge: '29 years',
+      date: '2026-11-18',
+      chiefComplaint: 'High fever and respiratory cough',
+      assessmentNotes: 'Viral syndrome under observation',
+      medications: [
+        {
+          name: 'Dolo 650',
+          brandName: 'Dolo 650',
+          genericName: 'Paracetamol',
+          dosage: '650mg',
+          frequency: '3 times a day',
+          timing: 'After meals',
+          duration: '3 days',
+          reason: 'Antipyretic',
+          instructions: 'Take after meals',
+        },
+      ],
+      recommendedTests: [
+        'Complete Blood Count (CBC) with Differential',
+        'Chest X-Ray (PA View)',
+        'Routine Urine Examination',
+      ],
+      advice: ['Hydration', 'Bed rest'],
+      followUp: 'Review in 48 hours',
+    };
+
+    const result = generatePrescriptionPdf(rxWithTests, false);
+    expect(result).toBeDefined();
+    const pdfOutput = result.doc.output();
+    expect(pdfOutput).toContain('RECOMMENDED DIAGNOSTIC TESTS');
+    expect(pdfOutput).toContain('CBC');
+  });
 });
