@@ -858,6 +858,14 @@ export function useGeminiLive({
           ) {
             reply = `Dhanyawaad. Aapse milkar accha laga. Kripya apne symptoms ke baare mein batayein, yeh dikkat kitne din se hai, aur fever ya pain ka level kaisa hai?`;
           } else if (
+            lower.includes('physical doctor') ||
+            lower.includes('doctor ko dikhaya') ||
+            lower.includes('clinic') ||
+            lower.includes('slip') ||
+            lower.includes('uploaded physical doctor prescription')
+          ) {
+            reply = `Aap physical doctor ka prescription image ya multi-page PDF me screen par upload kar sakte hain. Humare medical OCR system se main doctor ki handwriting aur medicines analyze karke aage ka treatment plan banaunga.`;
+          } else if (
             lower.includes('fever') ||
             lower.includes('throat') ||
             lower.includes('headache') ||
@@ -906,6 +914,14 @@ export function useGeminiLive({
           ) {
             reply = `Dhonyobad. Apnar shonge kotha bole bhalo laglo. Apnar main symptoms ki ki, koto din dhore hocche, aar fever ba pain kemon ache ektu bolun?`;
           } else if (
+            lower.includes('physical doctor') ||
+            lower.includes('doctor-ke dekhiye') ||
+            lower.includes('clinic') ||
+            lower.includes('slip') ||
+            lower.includes('uploaded physical doctor prescription')
+          ) {
+            reply = `Aapni apnar previous physical doctor-er prescription image ba PDF hishebe screen-e upload korun. OCR diye ami handwriting aar medicines check kore apnar treatment guide korbo.`;
+          } else if (
             lower.includes('fever') ||
             lower.includes('throat') ||
             lower.includes('headache') ||
@@ -950,6 +966,16 @@ export function useGeminiLive({
             /\d{1,2}\s*(years|yrs)/.test(lower)
           ) {
             reply = `Thank you. It is a pleasure to meet you. Please describe your main symptoms, how long you have felt this way, and your pain or fever level.`;
+          } else if (
+            lower.includes('physical doctor') ||
+            lower.includes('seen a doctor') ||
+            lower.includes('shown a doctor') ||
+            lower.includes('visited a doctor') ||
+            lower.includes('previous doctor') ||
+            lower.includes('uploaded physical doctor prescription') ||
+            (lower.includes('prescription') && (lower.includes('upload') || lower.includes('old') || lower.includes('previous') || lower.includes('slip')))
+          ) {
+            reply = `Please upload your previous physical doctor's prescription—either as an image or a PDF—using the Prescription Upload feature on your screen. Our medical OCR will examine the doctor's handwriting and medications so we can review your care.`;
           } else if (
             lower.includes('fever') ||
             lower.includes('throat') ||
