@@ -17,8 +17,9 @@ import {
   buildSystemInstructionWithLanguage,
   shouldAutoTriggerRx,
 } from '@/lib/constants';
-import { PrescriptionData, SavedConsultation } from '@/types/consultation';
+import { PrescriptionData, SavedConsultation, PhysicalPrescriptionOCR } from '@/types/consultation';
 import { normalizeMedication } from '@/lib/medication-utils';
+import { synthesizeFallbackOcr } from '@/lib/prescription-ocr';
 import {
   Stethoscope,
   Mic,
@@ -46,6 +47,11 @@ import {
   Menu,
   Volume2,
   Languages,
+  UploadCloud,
+  Camera,
+  ScanText,
+  Plus,
+  RotateCcw,
 } from 'lucide-react';
 
 export default function Home() {
@@ -90,6 +96,21 @@ export default function Home() {
   const [savedSuccessMessage, setSavedSuccessMessage] = useState<string | null>(null);
   const [isSavingToDb, setIsSavingToDb] = useState(false);
 
+  // Physical Prescription Upload & OCR State
+  const [physicalPrescription, setPhysicalPrescription] = useState<PhysicalPrescriptionOCR | null>(null);
+  const [isProcessingOcr, setIsProcessingOcr] = useState(false);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+  const [showOcrDetails, setShowOcrDetails] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // In-Browser Live Camera Scanner State (like Google Meet)
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [isCaptureMenuOpen, setIsCaptureMenuOpen] = useState(false);
+  const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+
   // Saved Consultations history from NoSQL database
   const [savedConsultations, setSavedConsultations] = useState<SavedConsultation[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -116,6 +137,7 @@ export default function Home() {
     sendTextMessage,
     setWritingState,
     startSimulatedConsultation,
+    speakDoctorText,
   } = useGeminiLive({
     customSystemInstruction: effectiveSystemInstruction,
     voiceName: selectedVoice,
@@ -425,6 +447,7 @@ export default function Home() {
           language: selectedLanguage,
           voiceProfile: selectedVoice,
           audioDevice: activeMicLabel,
+          physicalPrescription,
         }),
       });
 
@@ -470,8 +493,303 @@ export default function Home() {
     setTextInput('');
   };
 
+  // Process prescription OCR from Base64 (used by Live Camera Scanner)
+  const processPrescriptionBase64 = async (base64OrDataUrl: string, fileName: string, mimeType: string) => {
+    setIsProcessingOcr(true);
+    setOcrError(null);
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (apiKey) {
+        headers['x-gemini-api-key'] = apiKey;
+      }
+
+      const res = await fetch('/api/ocr-prescription', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          fileBase64: base64OrDataUrl,
+          fileName,
+          mimeType,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to process prescription OCR');
+      }
+
+      const ocrResult: PhysicalPrescriptionOCR = data.prescription;
+      setPhysicalPrescription(ocrResult);
+      setShowOcrDetails(true);
+
+      const medsSummary = (ocrResult.medications || [])
+        .map((m) => `${m.form ? m.form + ' ' : ''}${m.name} ${m.dosage || ''} (${m.frequency || ''} ${m.timing || ''})`.trim())
+        .join(', ');
+
+      const uploadNotice = `[Captured Physical Doctor Prescription with Live Camera: ${ocrResult.doctorName || 'Previous Doctor'} (${ocrResult.clinicOrHospital || 'Clinic'}): Diagnosed: ${ocrResult.diagnosis || 'Clinical condition'}. Prescribed: ${medsSummary || 'Medications'}. Doctor advice: ${ocrResult.advice?.join('; ') || 'Follow-up'}]`;
+
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: 'patient',
+          text: uploadNotice,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+
+      const doctorAckText = ocrResult.doctorName
+        ? `Thank you for taking a picture of your prescription from ${ocrResult.doctorName}. I have examined the doctor's handwriting through medical OCR: they diagnosed ${ocrResult.diagnosis || 'your condition'} and prescribed ${(ocrResult.medications || []).slice(0, 2).map((m) => m.name).join(' and ')}. Let's review how this treatment has been working for you.`
+        : `I've analyzed your captured physical prescription. I can read the doctor's handwriting and previous medications: ${(ocrResult.medications || []).slice(0, 2).map((m) => m.name).join(' and ')}. How have your symptoms progressed since taking these?`;
+
+      setTimeout(() => {
+        setTranscript((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            role: 'doctor',
+            text: doctorAckText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        if (speakDoctorText) {
+          speakDoctorText(doctorAckText);
+        }
+      }, 700);
+    } catch (err: any) {
+      console.error('Prescription OCR capture error:', err);
+      setOcrError(err?.message || 'Error processing prescription photo');
+    } finally {
+      setIsProcessingOcr(false);
+    }
+  };
+
+  // Load sample prescription for instant testing or when physical camera is busy
+  const loadSamplePrescription = () => {
+    closeCameraModal();
+    const sample = synthesizeFallbackOcr('sample-apollo-prescription.pdf');
+    setPhysicalPrescription(sample);
+    setShowOcrDetails(true);
+
+    const medsSummary = (sample.medications || [])
+      .map((m) => `${m.form ? m.form + ' ' : ''}${m.name} ${m.dosage || ''} (${m.frequency || ''} ${m.timing || ''})`.trim())
+      .join(', ');
+
+    const uploadNotice = `[Uploaded Physical Doctor Prescription from ${sample.doctorName} (${sample.clinicOrHospital}): Diagnosed: ${sample.diagnosis}. Prescribed: ${medsSummary}. Doctor advice: ${sample.advice?.join('; ')}]`;
+
+    setTranscript((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        role: 'patient',
+        text: uploadNotice,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
+
+    const doctorAckText = `Thank you for sharing your previous prescription from ${sample.doctorName}. I have examined the doctor's handwriting through medical OCR: they diagnosed ${sample.diagnosis} and prescribed ${sample.medications.slice(0, 2).map((m) => m.name).join(' and ')}. Let's review how this treatment has been working for you.`;
+
+    setTimeout(() => {
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          role: 'doctor',
+          text: doctorAckText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+      if (speakDoctorText) {
+        speakDoctorText(doctorAckText);
+      }
+    }, 700);
+  };
+
+  // Start in-browser camera stream (like Google Meet in Chrome, no native camera app)
+  const startCamera = async (facing: 'environment' | 'user' = cameraFacingMode) => {
+    setCameraError(null);
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+
+    try {
+      if (typeof window === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access is not supported by your browser.');
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: facing,
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false,
+      });
+
+      cameraStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+    } catch (err: any) {
+      console.warn('Camera error:', err);
+      if (facing === 'environment') {
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+          cameraStreamRef.current = fallbackStream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = fallbackStream;
+            await videoRef.current.play();
+          }
+          return;
+        } catch (fbErr: any) {
+          setCameraError('Unable to access camera: ' + (fbErr?.message || err?.message));
+          return;
+        }
+      }
+      setCameraError('Unable to access camera: ' + (err?.message || 'Permission denied'));
+    }
+  };
+
+  const openCameraModal = () => {
+    setIsCaptureMenuOpen(false);
+    setIsCameraModalOpen(true);
+    setTimeout(() => {
+      startCamera(cameraFacingMode);
+    }, 150);
+  };
+
+  const closeCameraModal = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+    setIsCameraModalOpen(false);
+    setCameraError(null);
+  };
+
+  const toggleCameraFacingMode = () => {
+    const nextMode = cameraFacingMode === 'environment' ? 'user' : 'environment';
+    setCameraFacingMode(nextMode);
+    startCamera(nextMode);
+  };
+
+  // Capture photo from video feed and send directly to OCR
+  const capturePhotoAndScan = async () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(video, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+
+    closeCameraModal();
+    await processPrescriptionBase64(dataUrl, 'camera-prescription.jpg', 'image/jpeg');
+  };
+
+  // Handle prescription file upload & OCR processing
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingOcr(true);
+    setOcrError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const headers: Record<string, string> = {};
+      if (apiKey) {
+        headers['x-gemini-api-key'] = apiKey;
+      }
+
+      const res = await fetch('/api/ocr-prescription', {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to process prescription OCR');
+      }
+
+      const ocrResult: PhysicalPrescriptionOCR = data.prescription;
+      setPhysicalPrescription(ocrResult);
+      setShowOcrDetails(true);
+
+      // Construct a concise summary for Dr. DoctoMPT and the consultation record
+      const medsSummary = (ocrResult.medications || [])
+        .map((m) => `${m.form ? m.form + ' ' : ''}${m.name} ${m.dosage || ''} (${m.frequency || ''} ${m.timing || ''})`.trim())
+        .join(', ');
+
+      const uploadNotice = `[Uploaded Physical Doctor Prescription from ${ocrResult.doctorName || 'Previous Doctor'} (${ocrResult.clinicOrHospital || 'Clinic'}): Diagnosed: ${ocrResult.diagnosis || 'Clinical condition'}. Prescribed: ${medsSummary || 'Medications'}. Doctor advice: ${ocrResult.advice?.join('; ') || 'Follow-up'}]`;
+
+      // Append patient upload turn to transcript
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: 'patient',
+          text: uploadNotice,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+
+      // Dr. DoctoMPT responds to acknowledge the physical prescription
+      const doctorAckText = ocrResult.doctorName
+        ? `Thank you for sharing your previous prescription from ${ocrResult.doctorName}. I have examined the doctor's handwriting through medical OCR: they diagnosed ${ocrResult.diagnosis || 'your condition'} and prescribed ${(ocrResult.medications || []).slice(0, 2).map((m) => m.name).join(' and ')}. Let's review how this treatment has been working for you.`
+        : `I've analyzed your uploaded physical prescription. I can read the doctor's handwriting and previous medications: ${(ocrResult.medications || []).slice(0, 2).map((m) => m.name).join(' and ')}. How have your symptoms progressed since taking these?`;
+
+      setTimeout(() => {
+        setTranscript((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            role: 'doctor',
+            text: doctorAckText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        if (speakDoctorText) {
+          speakDoctorText(doctorAckText);
+        }
+      }, 700);
+    } catch (err: any) {
+      console.error('Prescription OCR upload error:', err);
+      setOcrError(err?.message || 'Error uploading prescription document');
+    } finally {
+      setIsProcessingOcr(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
   // Quick Symptom Injection scenarios for easy demoing
   const quickScenarios = [
+    {
+      name: 'Pooja',
+      age: '31',
+      tag: 'Physical Doctor Follow-up',
+      prompt: 'Hello Doctor MPT, I showed a physical doctor at a clinic 2 days ago for fever and throat infection. Can I upload my prescription for you to check?',
+    },
     {
       name: 'Alex',
       age: '28',
@@ -1013,6 +1331,212 @@ export default function Home() {
               </button>
             )}
 
+            {/* Physical Doctor Prescription & Handwriting OCR Card */}
+            <div className="w-full mt-3 p-3.5 rounded-xl border border-teal-200/90 dark:border-teal-800/60 bg-teal-50/40 dark:bg-teal-950/20 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-teal-600 text-white shrink-0">
+                    <ScanText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      Physical Doctor Prescription OCR
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-neutral-400">
+                      Deciphers challenging handwriting & 1-0-1 dosages
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-teal-100 text-teal-800 dark:bg-teal-900/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800/50">
+                  PDF & Images
+                </span>
+              </div>
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".pdf,image/png,image/jpeg,image/jpg,image/webp"
+                className="hidden"
+              />
+
+              {!physicalPrescription ? (
+                <div className="mt-2 space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={openCameraModal}
+                      disabled={isProcessingOcr}
+                      className="py-2.5 px-3 rounded-lg border border-teal-300 hover:border-teal-500 dark:border-teal-700/60 dark:hover:border-teal-500 bg-white dark:bg-neutral-900 text-teal-800 dark:text-teal-200 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-xs hover:bg-teal-50/50 disabled:opacity-50"
+                      title="Take a live photo using Chrome's in-browser camera"
+                    >
+                      <Camera className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                      <span>Live Camera Photo</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isProcessingOcr}
+                      className="py-2.5 px-3 rounded-lg border border-teal-300 hover:border-teal-500 dark:border-teal-700/60 dark:hover:border-teal-500 bg-white dark:bg-neutral-900 text-teal-800 dark:text-teal-200 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-xs hover:bg-teal-50/50 disabled:opacity-50"
+                      title="Upload a multi-page PDF or image file"
+                    >
+                      <UploadCloud className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                      <span>Upload PDF / Image</span>
+                    </button>
+                  </div>
+
+                  {isProcessingOcr && (
+                    <div className="py-2 px-3 rounded-lg bg-teal-100/80 dark:bg-teal-950/80 text-teal-900 dark:text-teal-200 text-xs flex items-center justify-center gap-2 animate-pulse">
+                      <span className="w-3.5 h-3.5 border-2 border-teal-600 border-t-transparent rounded-full animate-spin" />
+                      <span>Pharmacist-Grade OCR: Deciphering Doctor Handwriting...</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-neutral-500 px-1">
+                    <span>Direct in-browser camera & multi-page PDF</span>
+                    <span>Tuned for messy Indian doctor cursive</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {/* Deciphered prescription header */}
+                  <div className="p-3 rounded-lg bg-white dark:bg-neutral-900 border border-teal-200 dark:border-teal-800/80 shadow-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span className="font-bold text-xs text-slate-900 dark:text-white">
+                            {physicalPrescription.doctorName || 'Physical Doctor'}
+                          </span>
+                          {physicalPrescription.doctorDegree && (
+                            <span className="text-[10px] text-slate-500 dark:text-neutral-400">
+                              ({physicalPrescription.doctorDegree})
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-600 dark:text-neutral-300 mt-0.5">
+                          {physicalPrescription.clinicOrHospital || 'Clinic'} {physicalPrescription.registrationNumber ? `• Reg: ${physicalPrescription.registrationNumber}` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhysicalPrescription(null);
+                          setShowOcrDetails(false);
+                        }}
+                        className="text-[10px] text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                        title="Remove prescription"
+                      >
+                        Clear
+                      </button>
+                    </div>
+
+                    {/* Diagnosis & Summary */}
+                    <div className="mt-2 pt-2 border-t border-slate-100 dark:border-neutral-800 flex flex-col gap-1 text-[11px]">
+                      {physicalPrescription.diagnosis && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-slate-700 dark:text-neutral-300">Diagnosis:</span>
+                          <span className="text-teal-800 dark:text-teal-300 font-medium">
+                            {physicalPrescription.diagnosis}
+                          </span>
+                        </div>
+                      )}
+                      <p className="text-slate-600 dark:text-neutral-300 italic">
+                        &ldquo;{physicalPrescription.handwritingAnalysisSummary}&rdquo;
+                      </p>
+                    </div>
+
+                    {/* Toggle Details */}
+                    <button
+                      type="button"
+                      onClick={() => setShowOcrDetails(!showOcrDetails)}
+                      className="mt-2 text-[11px] font-semibold text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      {showOcrDetails ? 'Hide Medications & Vitals' : `View ${physicalPrescription.medications?.length || 0} Deciphered Medications & Vitals`} &rarr;
+                    </button>
+
+                    {/* Expanded Details */}
+                    {showOcrDetails && (
+                      <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-neutral-800 space-y-2">
+                        {physicalPrescription.vitals && (
+                          <div className="flex flex-wrap gap-2 text-[10px]">
+                            {physicalPrescription.vitals.bloodPressure && (
+                              <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-neutral-300">
+                                BP: {physicalPrescription.vitals.bloodPressure}
+                              </span>
+                            )}
+                            {physicalPrescription.vitals.temperature && (
+                              <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-neutral-300">
+                                Temp: {physicalPrescription.vitals.temperature}
+                              </span>
+                            )}
+                            {physicalPrescription.vitals.pulseRate && (
+                              <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-neutral-300">
+                                Pulse: {physicalPrescription.vitals.pulseRate}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="space-y-1.5">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                            Recognized Handwritten Rx:
+                          </span>
+                          {(physicalPrescription.medications || []).map((m, idx) => (
+                            <div
+                              key={idx}
+                              className="p-1.5 rounded bg-slate-50 dark:bg-neutral-950/80 border border-slate-100 dark:border-neutral-800 text-[11px] flex items-center justify-between"
+                            >
+                              <div>
+                                <span className="font-semibold text-slate-800 dark:text-neutral-200">
+                                  {m.form ? `${m.form} ` : ''}{m.name}
+                                </span>
+                                {m.dosage && <span className="text-slate-500 ml-1">({m.dosage})</span>}
+                                {m.genericName && (
+                                  <p className="text-[10px] text-slate-400">{m.genericName}</p>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                <span className="px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-200 font-mono text-[10px] font-semibold">
+                                  {m.frequency}
+                                </span>
+                                {m.timing && (
+                                  <span className="block text-[10px] text-slate-500">{m.timing}</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {physicalPrescription.advice && physicalPrescription.advice.length > 0 && (
+                          <div className="text-[11px] text-slate-600 dark:text-neutral-400 mt-2">
+                            <span className="font-semibold text-slate-700 dark:text-neutral-300">Doctor Advice: </span>
+                            {physicalPrescription.advice.join(' • ')}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full py-1 text-center text-[11px] text-teal-700 dark:text-teal-400 font-semibold hover:underline cursor-pointer"
+                  >
+                    Upload another prescription or multi-page PDF
+                  </button>
+                </div>
+              )}
+
+              {ocrError && (
+                <div className="mt-2 p-2 rounded bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-300 text-xs flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{ocrError}</span>
+                </div>
+              )}
+            </div>
+
             {/* Quick Demo Starters */}
             <div className="w-full mt-3">
               <p className="text-xs font-bold text-slate-800 dark:text-neutral-300 mb-2.5 flex items-center gap-1.5">
@@ -1105,6 +1629,64 @@ export default function Home() {
                     >
                       {item.text}
                     </div>
+
+                    {/* In-conversation upload prompt when Dr. DoctoMPT asks for the prescription */}
+                    {item.role === 'doctor' &&
+                      !physicalPrescription &&
+                      /prescr?iption/i.test(item.text) &&
+                      /(upload|share|camera|photo|pdf|slip|image|previous|dikhaye|dekhiye|bataiye|dekhbo)/i.test(
+                        item.text
+                      ) && (
+                        <div className="mt-2.5 p-3 rounded-2xl bg-gradient-to-r from-teal-500/10 via-emerald-500/10 to-teal-500/5 dark:from-teal-500/20 dark:via-emerald-500/15 dark:to-teal-500/10 border border-teal-300 dark:border-teal-700/70 shadow-sm max-w-[95%] animate-in fade-in slide-in-from-top-2 duration-300">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="relative flex h-2.5 w-2.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-teal-500" />
+                            </span>
+                            <span className="text-xs font-bold text-teal-950 dark:text-teal-200">
+                              Dr. DoctoMPT is waiting for your prescription:
+                            </span>
+                          </div>
+
+                          <p className="text-[11px] text-slate-600 dark:text-neutral-300 mb-2.5 leading-relaxed">
+                            Snap a picture directly with your camera, upload an image/PDF, or test a sample prescription slip if your camera is busy.
+                          </p>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={openCameraModal}
+                              disabled={isProcessingOcr}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                              title="Take photo in Chrome (Google Meet style)"
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>Take Photo</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              disabled={isProcessingOcr}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-neutral-900 border border-teal-300 dark:border-teal-700/60 hover:bg-teal-50 dark:hover:bg-neutral-800 text-teal-800 dark:text-teal-200 font-semibold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <UploadCloud className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                              <span>Upload Image / PDF</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={loadSamplePrescription}
+                              disabled={isProcessingOcr}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:hover:bg-amber-900/50 border border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-200 font-semibold text-xs transition-all cursor-pointer disabled:opacity-50"
+                              title="Camera busy? Load realistic Indian doctor prescription slip"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                              <span>Try Sample Prescription</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
                   </div>
                 ))
               )}
@@ -1116,6 +1698,61 @@ export default function Home() {
               onSubmit={handleSendText}
               className="mt-1 pt-2 border-t border-slate-100 dark:border-neutral-800/80 flex items-center gap-2"
             >
+              {/* Plus Option Button for In-Browser Camera & PDF Upload */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsCaptureMenuOpen(!isCaptureMenuOpen)}
+                  disabled={isProcessingOcr}
+                  className="p-2.5 rounded-xl border border-teal-200 dark:border-teal-800/80 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900/60 text-teal-800 dark:text-teal-200 transition-all cursor-pointer shadow-xs disabled:opacity-50 flex items-center justify-center font-bold"
+                  title="Add physical prescription (Live camera or file)"
+                  aria-label="Add physical prescription"
+                >
+                  <Plus className="w-4 h-4 text-teal-700 dark:text-teal-300" />
+                </button>
+
+                {/* Popover Action Menu */}
+                {isCaptureMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-30"
+                      onClick={() => setIsCaptureMenuOpen(false)}
+                    />
+                    <div className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-2xl p-1.5 shadow-xl z-40 flex flex-col gap-1 text-xs">
+                      <button
+                        type="button"
+                        onClick={openCameraModal}
+                        className="w-full p-2 rounded-xl hover:bg-teal-50 dark:hover:bg-teal-950/50 text-left transition-colors flex items-center gap-2.5 text-slate-800 dark:text-neutral-200 cursor-pointer"
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-teal-100 dark:bg-teal-900/50 flex items-center justify-center shrink-0 text-teal-700 dark:text-teal-300">
+                          <Camera className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="font-semibold block text-slate-900 dark:text-white">Take Live Photo</span>
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400">Chrome in-browser camera (like Meet)</span>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCaptureMenuOpen(false);
+                          fileInputRef.current?.click();
+                        }}
+                        className="w-full p-2 rounded-xl hover:bg-teal-50 dark:hover:bg-teal-950/50 text-left transition-colors flex items-center gap-2.5 text-slate-800 dark:text-neutral-200 cursor-pointer"
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center shrink-0 text-blue-700 dark:text-blue-300">
+                          <UploadCloud className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="font-semibold block text-slate-900 dark:text-white">Upload PDF or Image</span>
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400">Multi-page PDF or photo file</span>
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
               <input
                 type="text"
                 value={textInput}
@@ -1577,6 +2214,140 @@ export default function Home() {
                 type="button"
                 onClick={() => setShowHistoryModal(false)}
                 className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-slate-700 dark:text-neutral-300 cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* In-Browser Live Camera Viewfinder Modal (Google Meet Style in Chrome) */}
+      {isCameraModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/90">
+              <div className="flex items-center gap-2">
+                <Camera className="w-4 h-4 text-teal-400" />
+                <h3 className="text-sm font-bold text-white">Live Prescription Scanner</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 font-semibold">
+                  In-Browser Camera
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={closeCameraModal}
+                className="p-1.5 rounded-full hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                title="Close camera"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Video Viewfinder Container */}
+            <div className="relative bg-black flex items-center justify-center min-h-[340px] sm:min-h-[400px] overflow-hidden">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover max-h-[440px]"
+              />
+
+              {/* Prescription Framing Guide Overlay */}
+              <div className="absolute inset-6 sm:inset-8 border-2 border-dashed border-teal-400/80 rounded-2xl pointer-events-none flex flex-col items-center justify-between p-3">
+                <span className="text-[11px] font-semibold tracking-wide uppercase px-2.5 py-1 rounded-full bg-black/70 text-teal-300 backdrop-blur-xs border border-teal-500/30">
+                  Align Prescription Inside Frame
+                </span>
+                <span className="text-[10px] text-neutral-300 bg-black/70 px-2 py-0.5 rounded backdrop-blur-xs">
+                  Pharmacist-Grade Handwriting OCR
+                </span>
+              </div>
+
+              {cameraError && (
+                <div className="absolute inset-4 bg-black/95 p-6 rounded-2xl flex flex-col items-center justify-center text-center gap-2 text-rose-300 text-xs">
+                  <AlertTriangle className="w-8 h-8 text-rose-400 mb-1" />
+                  <p className="font-semibold">{cameraError}</p>
+                  <p className="text-[11px] text-neutral-400 max-w-xs mt-1">
+                    Camera may be busy in another app or denied permission. You can upload an image directly or use a sample slip.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeCameraModal();
+                        fileInputRef.current?.click();
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <UploadCloud className="w-3.5 h-3.5" />
+                      <span>Upload Image File</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={loadSamplePrescription}
+                      className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Load Sample Slip</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Camera Controls Bar */}
+            <div className="p-4 bg-neutral-900/90 border-t border-neutral-800 flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={toggleCameraFacingMode}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium transition-colors cursor-pointer"
+                  title="Switch Front / Rear Camera"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Flip</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeCameraModal();
+                    fileInputRef.current?.click();
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium transition-colors cursor-pointer"
+                  title="Camera busy? Pick an image from device"
+                >
+                  <UploadCloud className="w-3.5 h-3.5 text-teal-400" />
+                  <span>Add Image</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={loadSamplePrescription}
+                  className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-amber-300 text-xs font-medium transition-colors cursor-pointer"
+                  title="Test sample prescription without camera"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">Sample</span>
+                </button>
+              </div>
+
+              {/* Shutter Button */}
+              <button
+                type="button"
+                onClick={capturePhotoAndScan}
+                disabled={!!cameraError}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white font-bold text-xs sm:text-sm shadow-lg shadow-teal-500/25 active:scale-95 transition-all cursor-pointer disabled:opacity-40"
+              >
+                <Camera className="w-4 h-4" />
+                <span>Capture & Scan</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={closeCameraModal}
+                className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-medium transition-colors cursor-pointer"
               >
                 Close
               </button>
