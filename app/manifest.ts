@@ -1,0 +1,35 @@
+import type { MetadataRoute } from 'next';
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: 'DoctoMPT - Dr. DoctoMPT AI Virtual Health Consultation',
+    short_name: 'DoctoMPT',
+    description: 'Real-time AI doctor voice consultation and instant PDF prescription generator with Dr. DoctoMPT',
+    start_url: '/',
+    display: 'standalone',
+    background_color: '#09090b',
+    theme_color: '#0d9488',
+    orientation: 'portrait',
+    scope: '/',
+    icons: [
+      {
+        src: '/icon.svg',
+        sizes: 'any',
+        type: 'image/svg+xml',
+        purpose: 'any',
+      },
+      {
+        src: '/icon.svg',
+        sizes: '192x192',
+        type: 'image/svg+xml',
+        purpose: 'maskable',
+      },
+      {
+        src: '/icon.svg',
+        sizes: '512x512',
+        type: 'image/svg+xml',
+        purpose: 'maskable',
+      },
+    ],
+  };
+}
