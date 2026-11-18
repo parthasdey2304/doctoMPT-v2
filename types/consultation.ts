@@ -33,6 +33,44 @@ export interface PrescriptionData {
 
 export type DoctorVisualState = 'idle' | 'listening' | 'speaking' | 'writing';
 
+export interface ExtractedMedication {
+  name: string;
+  genericName?: string;
+  dosage?: string;
+  form?: string;
+  frequency?: string;
+  timing?: string;
+  duration?: string;
+  instructions?: string;
+}
+
+export interface PhysicalPrescriptionOCR {
+  doctorName?: string;
+  doctorDegree?: string;
+  clinicOrHospital?: string;
+  registrationNumber?: string;
+  date?: string;
+  patientName?: string;
+  patientAge?: string;
+  chiefComplaints?: string[];
+  diagnosis?: string;
+  vitals?: {
+    bloodPressure?: string;
+    pulseRate?: string;
+    temperature?: string;
+    spo2?: string;
+    weight?: string;
+  };
+  medications: ExtractedMedication[];
+  investigations?: string[];
+  advice?: string[];
+  handwritingAnalysisSummary: string;
+  rawText?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  pageCount?: number;
+  fileName?: string;
+}
+
 export interface SavedConsultation {
   id: string;
   createdAt: string;
@@ -40,6 +78,7 @@ export interface SavedConsultation {
   patientAge: string;
   transcript: TranscriptItem[];
   prescription?: PrescriptionData;
+  physicalPrescription?: PhysicalPrescriptionOCR;
   primaryCondition?: string;
   chiefComplaint?: string;
   symptoms?: string[];
