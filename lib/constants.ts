@@ -1,7 +1,7 @@
 export const DEFAULT_DOCTOR_SYSTEM_INSTRUCTION = `You are Dr. DoctoMPT, an empathetic, sharp, authoritative, and licensed general physician conducting a live clinical medical consultation.
 
 Follow these strict clinical consultation guidelines:
-1. Warmly introduce yourself as Dr. DoctoMPT in 1-2 sentences. If you do not yet know the patient's name and age, politely ask for their name and age first in a warm, natural tone.
+1. Warmly introduce yourself as Dr. DoctoMPT in 1-2 sentences. First, politely ask the patient what language they are most comfortable speaking in (Hindi, Bengali, or English). Once their language preference is established, ask for their name and age in a warm, natural tone.
 2. Ask concise, focused clinical clarifying questions one at a time (e.g., onset and duration of symptoms, severity, fever temperature or pain level, associated symptoms, allergies, and current medications).
 3. PHYSICAL DOCTOR CONSULTATION & PRESCRIPTION INGESTION:
    - During clinical triage, ask the patient if they have already consulted or shown a physical doctor or clinic before for their symptoms.
@@ -51,7 +51,7 @@ export const CONSULTATION_LANGUAGES = [
 
 export type ConsultationLanguage = (typeof CONSULTATION_LANGUAGES)[number]['id'];
 
-export const DEFAULT_CONSULTATION_LANGUAGE: ConsultationLanguage = 'auto';
+export const DEFAULT_CONSULTATION_LANGUAGE: ConsultationLanguage = 'hinglish';
 
 export function getLanguageInstruction(lang: ConsultationLanguage): string {
   switch (lang) {
@@ -81,27 +81,28 @@ export function buildSystemInstructionWithLanguage(
 export function getGreetingPrompt(lang: ConsultationLanguage): string {
   switch (lang) {
     case 'hinglish':
-      return "The patient has just connected to the consultation room. Please introduce yourself warmly in natural Hinglish (conversational Hindi-English blend) as Dr. DoctoMPT, your virtual doctor for today, and ask for the patient's name and age to get started.";
+      return "The patient has just connected to the consultation room. Please introduce yourself warmly in natural Hinglish (conversational Hindi-English blend) as Dr. DoctoMPT, your virtual doctor for today. First, ask the patient if they are comfortable speaking in Hindi, Bengali, or English, and then ask for their name and age to get started.";
     case 'benglish':
-      return "The patient has just connected to the consultation room. Please introduce yourself warmly in natural Benglish (conversational Bengali-English blend) as Dr. DoctoMPT, your virtual doctor for today, and ask for the patient's name and age to get started.";
+      return "The patient has just connected to the consultation room. Please introduce yourself warmly in natural Benglish (conversational Bengali-English blend) as Dr. DoctoMPT, your virtual doctor for today. First, ask if they are comfortable speaking in Bengali, Hindi, or English, and then ask for their name and age to get started.";
     case 'en':
-      return "The patient has just connected to the consultation room. Please introduce yourself warmly in clear English as Dr. DoctoMPT, your virtual doctor for today, and ask for the patient's name and age to get started.";
+      return "The patient has just connected to the consultation room. Please introduce yourself warmly in clear English as Dr. DoctoMPT, your virtual doctor for today. First, ask the patient if they are comfortable proceeding in English or prefer Hindi/Bengali, and then ask for their name and age to get started.";
     case 'auto':
     default:
-      return "The patient has just connected to the consultation room. Please introduce yourself warmly as Dr. DoctoMPT, your virtual doctor for today, and ask for the patient's name and age to get started.";
+      return "The patient has just connected to the consultation room. Please introduce yourself warmly as Dr. DoctoMPT, your virtual doctor for today. First, ask the patient what language they are most comfortable speaking in (Hindi, Bengali, or English), and then ask for their name and age to get started.";
   }
 }
 
 export function getSimulatedGreeting(lang: ConsultationLanguage): string {
   switch (lang) {
     case 'hinglish':
-      return "Namaste! Main Dr. DoctoMPT hoon, aapka virtual doctor. Consultation shuru karne ke liye, kya aap apna naam aur age bata sakte hain?";
+      return "Namaste! Main Dr. DoctoMPT hoon, aaj ke liye aapka virtual doctor. Shuru karne se pehle, kya aap Hindi, Bengali, ya English me baat karna comfortable feel karenge? Aur saath hi apna naam aur age bhi bata dijiye.";
     case 'benglish':
-      return "Nomoshkar! Ami Dr. DoctoMPT, apnar virtual doctor. Consultation shuru korar age, apnar naam ebong boyosh-ti ki bolben?";
+      return "Nomoshkar! Ami Dr. DoctoMPT, ajker jonne apnar virtual doctor. Consultation shuru korar age, apni ki Bengali, Hindi, ba English-e kotha bolte comfortable feel korben? Ebong apnar naam ebong boyosh-ti ki bolben?";
     case 'en':
+      return "Hello, I am Dr. DoctoMPT, your virtual doctor for today. Before we begin, are you comfortable speaking in English, Hindi, or Bengali? Also, could you please tell me your name and age?";
     case 'auto':
     default:
-      return "Hello, I am Dr. DoctoMPT, your virtual doctor for today. To get started, could you please tell me your name and your age?";
+      return "Hello! Main Dr. DoctoMPT hoon, your virtual doctor for today. Before we begin, which language are you most comfortable with—Hindi, Bengali, or English? Also, could you please share your name and age?";
   }
 }
 
@@ -117,9 +118,12 @@ export function shouldAutoTriggerRx(
   if (lastTurn.role === 'patient') {
     const patientText = lastTurn.text.trim();
 
-    // Multilingual affirmation check (English, Hinglish, Benglish)
+    // Multilingual affirmation check (English, Hinglish, Benglish, Devanagari Hindi, and Bengali)
     const isAffirmation =
-      /\b(yes|yeah|yep|sure|please do|please|ok|okay|definitely|make it|download|generate|haan|haanji|ha|ji|theek hai|bilkul|thik ache|hae)\b/i.test(
+      /\b(yes|yeah|yep|sure|please do|please|ok|okay|definitely|make it|download|generate|haan|haanji|ha|ji|theek hai|bilkul|thik ache|hae|bana do|bana de|bana dijiye|jaldi|kardo|kar do|ready kar do)\b/i.test(
+        patientText
+      ) ||
+      /(हाँ|हां|हाँजी|हांजी|बना दो|बना दीजिए|बना दे|कर दो|कर दीजिए|तैयार कर दो|तैयार कर दीजिए|जल्दी|ठीक है|जी हाँ|जी हां|अवश्य|ज़रूर|जरूर|হ্যাঁ|বানিয়ে দিন|ঠিক আছে|জরুর)/i.test(
         patientText
       );
 
@@ -132,7 +136,7 @@ export function shouldAutoTriggerRx(
       const offered = recentDoctorTurns.some(
         (t) =>
           /prescr?iption/i.test(t.text) &&
-          /(prepare|need|want|ready|like|would you|shall|now|chahiye|bana|dorkar|lagbe|chan)/i.test(
+          /(prepare|need|want|ready|like|would you|shall|now|chahiye|bana|dorkar|lagbe|chan|kar do|kardo|banau)/i.test(
             t.text
           )
       );
@@ -143,6 +147,9 @@ export function shouldAutoTriggerRx(
     // Case 2: Patient directly requests prescription creation or PDF
     const isDirectRequest =
       /(generate|download|prepare|make|create|give me|need)\s+.*(prescr?iption|pdf)/i.test(
+        patientText
+      ) ||
+      /(prescription|pdf|दवा|पर्ची|প্রেসক্রিপশন)\s*(बना|डाउनलोड|दे|तैयार|বানিয়ে)/i.test(
         patientText
       );
     if (isDirectRequest) return true;

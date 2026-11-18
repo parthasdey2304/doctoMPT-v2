@@ -37,6 +37,11 @@ export function useGeminiLive({
   const [micLevel, setMicLevel] = useState(0);
   const [speakerLevel, setSpeakerLevel] = useState(0);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
+  const transcriptRef = useRef<TranscriptItem[]>(transcript);
+  useEffect(() => {
+    transcriptRef.current = transcript;
+  }, [transcript]);
+
   const [patientName, setPatientName] = useState('');
   const [patientAge, setPatientAge] = useState('');
 
@@ -370,8 +375,12 @@ export function useGeminiLive({
                 const userTurnText = currentUserTurnRef.current.trim();
                 setTranscript((prev) => {
                   const last = prev[prev.length - 1];
-                  if (last && last.role === 'patient' && last.text.toLowerCase() === userTurnText.toLowerCase()) {
-                    return prev;
+                  if (last && last.role === 'patient') {
+                    const normLast = last.text.trim().toLowerCase();
+                    const normUser = userTurnText.toLowerCase();
+                    if (normLast === normUser || normLast.includes(normUser) || normUser.includes(normLast)) {
+                      return prev;
+                    }
                   }
                   return [
                     ...prev,
@@ -424,16 +433,24 @@ export function useGeminiLive({
 
       sessionRef.current = session;
 
-      // 5. Send immediate opening turn prompt so Dr. DoctoMPT introduces himself and speaks first
+      // 5. Send opening turn prompt or resume ongoing consultation context
       try {
-        const greetingPromptText = getGreetingPrompt(consultationLanguage);
+        let initialPromptText = getGreetingPrompt(consultationLanguage);
+        if (transcriptRef.current && transcriptRef.current.length > 0) {
+          const recentDialogue = transcriptRef.current
+            .slice(-6)
+            .map((t) => `${t.role.toUpperCase()}: ${t.text}`)
+            .join('\n');
+          initialPromptText = `You are continuing an ongoing clinical consultation with the patient. Here is the recent conversation transcript:\n${recentDialogue}\n\nPlease smoothly continue from the last clinical point without introducing yourself from scratch.`;
+        }
+
         session.sendClientContent({
           turns: [
             {
               role: 'user',
               parts: [
                 {
-                  text: greetingPromptText,
+                  text: initialPromptText,
                 },
               ],
             },
@@ -612,19 +629,29 @@ export function useGeminiLive({
                       setPatientAge(ageMatch[1]);
                     }
 
-                    // Add patient turn to transcript cleanly
-                    setTranscript((prev) => [
-                      ...prev,
-                      {
-                        id: `turn_${Date.now()}_patient_voice`,
-                        role: 'patient',
-                        text: spokenText,
-                        timestamp: new Date().toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        }),
-                      },
-                    ]);
+                    // Add patient turn to transcript cleanly without duplicates
+                    setTranscript((prev) => {
+                      const last = prev[prev.length - 1];
+                      if (last && last.role === 'patient') {
+                        const normLast = last.text.trim().toLowerCase();
+                        const normSpoken = spokenText.trim().toLowerCase();
+                        if (normLast === normSpoken || normLast.includes(normSpoken) || normSpoken.includes(normLast)) {
+                          return prev;
+                        }
+                      }
+                      return [
+                        ...prev,
+                        {
+                          id: `turn_${Date.now()}_patient_voice`,
+                          role: 'patient',
+                          text: spokenText,
+                          timestamp: new Date().toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }),
+                        },
+                      ];
+                    });
                     setStatusText('Doctor listening...');
                   } else if (!res.isFinal && spokenText) {
                     // Show live interim words as the user speaks

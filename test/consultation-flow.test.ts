@@ -6,6 +6,7 @@ import {
   INACTIVITY_TIMEOUT_SECONDS,
   INACTIVITY_WARNING_SECONDS,
   CONSULTATION_LANGUAGES,
+  DEFAULT_CONSULTATION_LANGUAGE,
   getLanguageInstruction,
   buildSystemInstructionWithLanguage,
   getGreetingPrompt,
@@ -41,6 +42,10 @@ describe('Doctor Consultation Flow & Protocol Guidelines', () => {
     expect(DEFAULT_DOCTOR_SYSTEM_INSTRUCTION).toContain(
       'Would you like me to prepare your medical prescription now?'
     );
+  });
+
+  test('DEFAULT_CONSULTATION_LANGUAGE defaults to Hinglish', () => {
+    expect(DEFAULT_CONSULTATION_LANGUAGE).toBe('hinglish');
   });
 
   test('CONSULTATION_LANGUAGES has exactly 4 options with required labels', () => {
@@ -83,17 +88,19 @@ describe('Doctor Consultation Flow & Protocol Guidelines', () => {
   });
 
   describe('Greeting Prompts & Simulated Intro in All 4 Languages', () => {
-    test('getGreetingPrompt targets correct language for live WebSocket connect', () => {
+    test('getGreetingPrompt targets correct language and asks language comfort first', () => {
       expect(getGreetingPrompt('hinglish')).toContain('Hinglish');
+      expect(getGreetingPrompt('hinglish').toLowerCase()).toContain('hindi, bengali, or english');
       expect(getGreetingPrompt('benglish')).toContain('Benglish');
       expect(getGreetingPrompt('en')).toContain('clear English');
       expect(getGreetingPrompt('auto')).toContain('name and age');
     });
 
-    test('getSimulatedGreeting returns language-appropriate introductory phrases', () => {
+    test('getSimulatedGreeting returns language-appropriate introductory phrases asking language comfort', () => {
       const hinglishSim = getSimulatedGreeting('hinglish');
       expect(hinglishSim).toContain('Namaste');
       expect(hinglishSim).toContain('Dr. DoctoMPT');
+      expect(hinglishSim).toContain('Hindi, Bengali, ya English');
       expect(hinglishSim).toContain('naam aur age');
 
       const benglishSim = getSimulatedGreeting('benglish');
@@ -103,10 +110,10 @@ describe('Doctor Consultation Flow & Protocol Guidelines', () => {
 
       const enSim = getSimulatedGreeting('en');
       expect(enSim).toContain('Hello, I am Dr. DoctoMPT');
-      expect(enSim).toContain('name and your age');
+      expect(enSim).toContain('name and age');
 
       const autoSim = getSimulatedGreeting('auto');
-      expect(autoSim).toContain('Hello, I am Dr. DoctoMPT');
+      expect(autoSim).toContain('Dr. DoctoMPT');
     });
   });
 
@@ -174,9 +181,30 @@ describe('Doctor Consultation Flow & Protocol Guidelines', () => {
           { role: 'patient', text: 'Bilkul' },
         ])
       ).toBe(true);
+
+      // Colloquial Indian Hindi / Devanagari affirmations from real consultation
+      expect(
+        shouldAutoTriggerRx([
+          {
+            role: 'doctor',
+            text: 'Thik hai, kya aap chahte hain ki main aapka medical prescription abhi prepare kar do?',
+          },
+          { role: 'patient', text: 'हाँ बना दो भाई जल्दी जल्दी बना दो।' },
+        ])
+      ).toBe(true);
+
+      expect(
+        shouldAutoTriggerRx([
+          {
+            role: 'doctor',
+            text: 'Kya main aapka prescription ready kar doon?',
+          },
+          { role: 'patient', text: 'हांजी तैयार कर दीजिए' },
+        ])
+      ).toBe(true);
     });
 
-    test('triggers with Benglish affirmations (thik ache, hae, nishchoi)', () => {
+    test('triggers with Benglish affirmations (thik ache, hae, nishchoi, Bengali script)', () => {
       expect(
         shouldAutoTriggerRx([
           {
@@ -193,7 +221,7 @@ describe('Doctor Consultation Flow & Protocol Guidelines', () => {
             role: 'doctor',
             text: 'Apnar ki prescription lagbe?',
           },
-          { role: 'patient', text: 'Hae please' },
+          { role: 'patient', text: 'হ্যাঁ বানিয়ে দিন' },
         ])
       ).toBe(true);
     });
