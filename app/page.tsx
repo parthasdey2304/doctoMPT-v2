@@ -71,6 +71,9 @@ export default function Home() {
   // Hamburger drawer / side panel state
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
 
+  // Developer & Admin Mode: when false (default), technical model IDs & quick test scenarios are hidden
+  const [devMode, setDevMode] = useState<boolean>(false);
+
   // Config & State stored in localStorage
   const [apiKey, setApiKey] = useState('');
   const [systemInstruction, setSystemInstruction] = useState(
@@ -1554,51 +1557,98 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Section 7: Interactive Walkthrough Demo */}
-          <div className="space-y-2">
-            <label className="text-[11px] font-bold tracking-wider uppercase text-slate-500 dark:text-neutral-400 block">
-              Offline Simulation
-            </label>
+          {/* Clinical Accreditation Badge (Default Clinical User View) */}
+          <div className="p-3 rounded-xl bg-slate-100/80 dark:bg-neutral-900/60 border border-slate-200 dark:border-neutral-800 text-[11px] text-slate-600 dark:text-neutral-400 space-y-1.5">
+            <div className="flex justify-between items-center">
+              <span>Clinical Standard:</span>
+              <span className="font-semibold text-teal-700 dark:text-teal-400">NMC Medical Protocol</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span>Security & Privacy:</span>
+              <span className="font-semibold text-emerald-700 dark:text-emerald-400">256-bit Encrypted</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span>Attending Physician:</span>
+              <span className="font-semibold text-slate-800 dark:text-neutral-200">Dr. DoctoMPT</span>
+            </div>
+          </div>
+
+          {/* Developer & Admin Mode Toggle */}
+          <div className="pt-2 border-t border-slate-200 dark:border-neutral-800 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-neutral-400 font-medium">
+              <Cpu className="w-3.5 h-3.5 text-slate-500" />
+              <span>Developer & Admin Mode</span>
+            </div>
             <button
               type="button"
-              onClick={() => {
-                startSimulatedConsultation();
-                setIsSidePanelOpen(false);
-              }}
-              className="w-full p-3 rounded-xl border border-teal-200 dark:border-teal-500/30 bg-teal-50/50 dark:bg-teal-950/30 hover:bg-teal-100/60 dark:hover:bg-teal-900/30 text-left transition-colors flex items-center justify-between group cursor-pointer shadow-xs"
+              onClick={() => setDevMode(!devMode)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
+                devMode ? 'bg-teal-600' : 'bg-slate-300 dark:bg-neutral-700'
+              }`}
+              title="Toggle Developer & Technical Diagnostic View"
             >
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                <div>
-                  <span className="font-semibold text-teal-900 dark:text-teal-200 block">
-                    Interactive Doctor Walkthrough
-                  </span>
-                  <span className="text-[11px] text-teal-700/80 dark:text-teal-400/80">
-                    Test complete voice dialogue & Rx generation
-                  </span>
-                </div>
-              </div>
-              <span className="text-xs text-teal-700 dark:text-teal-300 font-bold">
-                Run
-              </span>
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-xs transition-transform ${
+                  devMode ? 'translate-x-4.5' : 'translate-x-1'
+                }`}
+              />
             </button>
           </div>
 
-          {/* Architecture Badge */}
-          <div className="p-3 rounded-xl bg-slate-100 dark:bg-neutral-900/60 border border-slate-200 dark:border-neutral-800 text-[11px] text-slate-500 dark:text-neutral-400 space-y-1">
-            <div className="flex justify-between">
-              <span>Doctor Engine:</span>
-              <span className="font-mono text-teal-600 dark:text-teal-400 font-semibold">gemini-3.8-live</span>
+          {/* Admin & Developer Diagnostics Panel (Hidden for standard clinical users) */}
+          {devMode && (
+            <div className="space-y-3 pt-2 border-t border-dashed border-teal-500/30">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold tracking-wider uppercase text-teal-700 dark:text-teal-400 font-mono">
+                  Admin & Diagnostics
+                </span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-300 font-mono">
+                  DEV ACTIVE
+                </span>
+              </div>
+
+              {/* Technical Architecture Badge */}
+              <div className="p-3 rounded-xl bg-slate-100 dark:bg-neutral-900 border border-teal-500/30 text-[11px] text-slate-500 dark:text-neutral-400 space-y-1 font-mono">
+                <div className="flex justify-between">
+                  <span>Doctor Engine:</span>
+                  <span className="text-teal-600 dark:text-teal-400 font-semibold">gemini-3.8-flash-live</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Prescription Parser:</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">gemini-3.5-flash-lite</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Backend Cloud:</span>
+                  <span className="text-slate-700 dark:text-neutral-300 font-semibold">AWS 16.179.171.132</span>
+                </div>
+              </div>
+
+              {/* Interactive Walkthrough Demo */}
+              <button
+                type="button"
+                onClick={() => {
+                  startSimulatedConsultation();
+                  setIsSidePanelOpen(false);
+                }}
+                className="w-full p-2.5 rounded-xl border border-teal-200 dark:border-teal-500/30 bg-teal-50/50 dark:bg-teal-950/30 hover:bg-teal-100/60 text-left transition-colors flex items-center justify-between group cursor-pointer shadow-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                  <div>
+                    <span className="font-semibold text-xs text-teal-900 dark:text-teal-200 block">
+                      Interactive Walkthrough
+                    </span>
+                    <span className="text-[10px] text-teal-700/80 dark:text-teal-400/80">
+                      Simulate voice session & PDF
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[11px] text-teal-700 dark:text-teal-300 font-bold">
+                  Run
+                </span>
+              </button>
             </div>
-            <div className="flex justify-between">
-              <span>Prescription Parser:</span>
-              <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">gemini-3.5-flash-lite</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Verified Signature:</span>
-              <span className="font-semibold text-slate-700 dark:text-neutral-300">Dr. DoctoMPT</span>
-            </div>
-          </div>
+          )}
         </div>
       </aside>
 
@@ -1621,9 +1671,15 @@ export default function Home() {
               </p>
             </div>
             <div className="text-right">
-              <span className="text-[11px] font-mono text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800/50 px-2 py-0.5 rounded-md font-semibold">
-                gemini-3.8-live
-              </span>
+              {devMode ? (
+                <span className="text-[11px] font-mono text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800/50 px-2 py-0.5 rounded-md font-semibold">
+                  gemini-3.8-flash-live
+                </span>
+              ) : (
+                <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800/50 px-2.5 py-0.5 rounded-full">
+                  Virtual Clinic
+                </span>
+              )}
             </div>
           </div>
 
@@ -1637,37 +1693,11 @@ export default function Home() {
             statusText={statusText}
           />
 
-          {/* Primary Consultation Call Actions */}
+          {/* Unified Consultation Action Flow (Single primary action per state) */}
           <div className="w-full mt-4 pt-4 border-t border-slate-100 dark:border-neutral-800/80 flex flex-col items-center gap-3">
-            {/* Quota / Billing Depletion Notice & Switch to Demo Banner */}
-            {(statusText.toLowerCase().includes('depleted') ||
-              statusText.toLowerCase().includes('1011') ||
-              statusText.toLowerCase().includes('prepayment')) && (
-              <div className="w-full p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-500/40 text-amber-900 dark:text-amber-200 text-xs flex flex-col gap-2 shadow-xs">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold text-amber-800 dark:text-amber-300">
-                      Google AI Studio Notice:
-                    </span>
-                    <p className="text-[11px] text-amber-700 dark:text-amber-200/80 mt-0.5">
-                      Your current API key has 0 remaining prepayment credits for the Live WebSocket server. You can still test the entire voice doctor with <strong>Interactive Demo Mode</strong>!
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={startSimulatedConsultation}
-                  className="w-full py-2 px-3 rounded-lg bg-amber-600/10 hover:bg-amber-600/20 border border-amber-300 dark:border-amber-500/50 text-amber-800 dark:text-amber-200 font-semibold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                  <span>Launch Interactive Doctor Demo</span>
-                </button>
-              </div>
-            )}
-
             {!isConnected ? (
-              <div className="w-full flex flex-col gap-2">
+              /* State 1 & 2: Disconnected / Connecting - Exactly ONE primary action button */
+              <div className="w-full flex flex-col items-center gap-2">
                 <button
                   type="button"
                   onClick={connect}
@@ -1687,24 +1717,53 @@ export default function Home() {
                   )}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={startSimulatedConsultation}
-                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 dark:bg-neutral-800/80 dark:hover:bg-neutral-800 text-slate-800 dark:text-neutral-300 border border-slate-200 dark:border-neutral-700/60 transition-all cursor-pointer shadow-xs"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                  <span>Start Interactive Doctor (Demo Mode)</span>
-                </button>
+                {/* Developer / Demo fallback (subtle, non-competing) */}
+                {devMode && (
+                  <button
+                    type="button"
+                    onClick={startSimulatedConsultation}
+                    className="text-[11px] text-slate-500 hover:text-teal-600 dark:text-neutral-400 dark:hover:text-teal-400 flex items-center gap-1.5 transition-colors cursor-pointer pt-1"
+                  >
+                    <Sparkles className="w-3 h-3 text-teal-600" />
+                    <span>Run Offline Simulation Demo</span>
+                  </button>
+                )}
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={disconnect}
-                className="w-full py-3.5 px-6 rounded-xl font-semibold text-sm flex items-center justify-center gap-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/20 dark:hover:bg-rose-500/30 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/40 shadow-xs active:scale-[0.99] transition-all cursor-pointer"
-              >
-                <PhoneOff className="w-4 h-4 text-rose-600 dark:text-rose-400" />
-                <span>End Consultation Call</span>
-              </button>
+              /* State 3: Active Consultation - Unified action bar with End Call and Mute controls */
+              <div className="w-full flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={toggleMute}
+                  title={isMuted ? 'Unmute Microphone' : 'Mute Microphone'}
+                  className={`py-3 px-4 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                    isMuted
+                      ? 'bg-rose-50 border-rose-300 text-rose-700 hover:bg-rose-100 dark:bg-rose-500/20 dark:border-rose-500/40 dark:text-rose-300'
+                      : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200 dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-200'
+                  }`}
+                >
+                  {isMuted ? (
+                    <>
+                      <MicOff className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+                      <span className="hidden sm:inline">Unmuted</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                      <span className="hidden sm:inline">Mute</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={disconnect}
+                  className="flex-1 py-3.5 px-6 rounded-xl font-semibold text-sm flex items-center justify-center gap-2.5 bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20 active:scale-[0.99] transition-all cursor-pointer"
+                >
+                  <PhoneOff className="w-4 h-4 text-white" />
+                  <span>End Consultation Call</span>
+                </button>
+              </div>
             )}
 
             {/* Document Ingestion & Optical Character Recognition (OCR) Suite */}
@@ -2172,40 +2231,45 @@ export default function Home() {
               )}
             </div>
 
-            {/* Quick Demo Starters */}
-            <div className="w-full mt-3">
-              <p className="text-xs font-bold text-slate-800 dark:text-neutral-300 mb-2.5 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                <span>One-Click Quick Test Scenarios:</span>
-              </p>
-              <div className="flex flex-col gap-2">
-                {quickScenarios.map((scen, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => {
-                      sendTextMessage(scen.prompt);
-                      if (!isConnected && !isConnecting) {
-                        connect();
-                      }
-                    }}
-                    className="w-full text-left bg-slate-50/80 hover:bg-teal-50/50 dark:bg-neutral-950/90 dark:hover:bg-neutral-800/90 border border-slate-200 hover:border-teal-400 dark:border-neutral-800/90 dark:hover:border-teal-500/40 p-3 rounded-xl transition-all shadow-xs group cursor-pointer"
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold text-slate-900 dark:text-teal-300 group-hover:text-teal-700 dark:group-hover:text-teal-200">
-                        {scen.name} ({scen.age} yrs)
-                      </span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100/70 text-teal-800 dark:bg-teal-500/10 dark:text-teal-300 border border-teal-200 dark:border-teal-500/20 font-semibold">
-                        {scen.tag}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 dark:text-neutral-300 leading-relaxed font-normal">
-                      &ldquo;{scen.prompt}&rdquo;
-                    </p>
-                  </button>
-                ))}
+            {/* Developer & Admin Quick Demo Starters (Hidden in Standard Clinical Session) */}
+            {devMode && (
+              <div className="w-full mt-3 p-3 rounded-xl border border-dashed border-teal-300 dark:border-teal-800/70 bg-teal-50/20 dark:bg-teal-950/10">
+                <p className="text-xs font-bold text-slate-800 dark:text-neutral-300 mb-2.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                    <span>Developer Quick Test Scenarios</span>
+                  </span>
+                  <span className="text-[10px] text-teal-600 uppercase font-mono font-bold">Admin Only</span>
+                </p>
+                <div className="flex flex-col gap-2">
+                  {quickScenarios.map((scen, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        sendTextMessage(scen.prompt);
+                        if (!isConnected && !isConnecting) {
+                          connect();
+                        }
+                      }}
+                      className="w-full text-left bg-slate-50/80 hover:bg-teal-50/50 dark:bg-neutral-950/90 dark:hover:bg-neutral-800/90 border border-slate-200 hover:border-teal-400 dark:border-neutral-800/90 dark:hover:border-teal-500/40 p-3 rounded-xl transition-all shadow-xs group cursor-pointer"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-bold text-slate-900 dark:text-teal-300 group-hover:text-teal-700 dark:group-hover:text-teal-200">
+                          {scen.name} ({scen.age} yrs)
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100/70 text-teal-800 dark:bg-teal-500/10 dark:text-teal-300 border border-teal-200 dark:border-teal-500/20 font-semibold">
+                          {scen.tag}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-neutral-300 leading-relaxed font-normal">
+                        &ldquo;{scen.prompt}&rdquo;
+                      </p>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </section>
 

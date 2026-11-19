@@ -22,9 +22,11 @@ class Settings(BaseSettings):
 
     PORT: int = int(os.getenv("PORT", 8000))
     HOST: str = os.getenv("HOST", "0.0.0.0")
+    API_SECRET_KEY: str = os.getenv("API_SECRET_KEY", "doctompt_secure_bridge_2026")
     CORS_ORIGINS: List[str] = [
         "https://docto-mpt.vercel.app",
         "https://doctompt.vercel.app",
+        "https://doctompt-aws-hybrid.vercel.app",
         "http://localhost:3000",
     ]
 

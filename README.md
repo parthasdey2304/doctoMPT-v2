@@ -98,21 +98,36 @@ This is **neither a basic chunk-only RAG nor a vectorless RAG**. It combines:
 
 ## 🛡 Security & Hardening on AWS EC2
 
-To protect the server against automated exploits and unauthorized cryptocurrency mining:
+To protect the server against automated exploits, concurrency bottlenecks, and unauthorized access:
 
 1. **UFW Firewall:**
    - **Default Policy:** Strict `deny incoming`, `allow outgoing`.
    - **Allowed Ports:** `22` (SSH with connection rate-limiting), `80` (HTTP), `443` (HTTPS).
    - All internal services (`8000`, `7474`, `7687`) are blocked from external access.
 2. **Nginx Reverse Proxy & Origin Lockdown:**
-   - Enforces CORS whitelisting: only `https://docto-mpt.vercel.app` (and local development) can access API endpoints.
+   - Enforces CORS whitelisting: only authorized Vercel deployments (`https://docto-mpt.vercel.app`, `https://doctompt.vercel.app`, and `https://doctompt-aws-hybrid.vercel.app`) can access API endpoints.
    - Built-in rate limiting (`15 req/s`, burst of 30) prevents scraping and slowloris DDoS attacks.
    - Strips server signatures (`server_tokens off`) and injects OWASP security headers.
 3. **Database Localhost Isolation:**
    - Neo4j Bolt (`7687`) and HTTP (`7474`) are bound strictly to `127.0.0.1` inside Docker.
 4. **Brute-Force & Stability Defense:**
    - `fail2ban` dynamically bans offending IPs.
-   - 2GB swap space guarantees memory stability on the `t3.micro` AWS instance.
+   - 2GB swap space guarantees memory stability on the `t3.small` AWS instance.
+
+---
+
+## 🛡 Production Hardening & Live Verification (AWS EC2 t3.small)
+
+The following backend systems and reliability enhancements have been deployed and verified live on the AWS instance (`3.26.55.253`):
+
+| Layer | Implementation | Verification Status |
+| :--- | :--- | :--- |
+| **SQLite Concurrency & Locking** | Configured `PRAGMA journal_mode = WAL;` (Write-Ahead Logging) & `busy_timeout = 5000;` to enable concurrent reads & writes without table locking | Verified: Active `storage: AWS EC2 SQLite (WAL Mode)` |
+| **Automated Zero-Downtime Backups** | Implemented non-blocking SQLite online backup API (`conn.backup()`) with a 6-hour automated daemon and rotation policy (retaining last 10 snapshots) | Verified: 3 backup snapshots created & verified in `/data/backups/` |
+| **API Rate Limiting** | Added sliding-window IP rate limiters (60 RPM for data routes, 25 RPM for LLM generation) returning standard `HTTP 429 Too Many Requests` | Verified & active |
+| **API Authentication Guard** | Added `X-API-Key` header guard to protect private endpoints from unauthorized public access | Verified & active |
+| **FastAPI & Uvicorn** | Deployed with `doctompt.service` systemd unit running dual workers on port 8000 behind Nginx port 80 | Verified: Systemd service `active (running)` |
+| **Tata 1mg & PharmEasy APIs** | Verified live scraping & catalog fallbacks for Indian medicines (`/api/medicines/1mg`, `/api/medicines/pharmeasy`) | Verified: Both APIs returning verified formulation data |
 
 ---
 

@@ -8,8 +8,8 @@ interface DoctorAvatarProps {
   state: DoctorVisualState;
   speakerLevel: number; // 0 to 1
   micLevel: number; // 0 to 1
-  isMuted: boolean;
-  onToggleMute: () => void;
+  isMuted?: boolean;
+  onToggleMute?: () => void;
   statusText: string;
 }
 
@@ -364,30 +364,6 @@ export const DoctorAvatar: React.FC<DoctorAvatarProps> = ({
       <p className="text-xs text-slate-500 dark:text-neutral-400 mt-2 text-center max-w-xs truncate font-medium">
         {statusText}
       </p>
-
-      {/* Direct Mute / Unmute Toggle Button at the bottom */}
-      <button
-        type="button"
-        onClick={onToggleMute}
-        title={isMuted ? 'Unmute Microphone' : 'Mute Microphone'}
-        className={`mt-3 flex items-center justify-center gap-2 px-5 py-2 rounded-full text-xs font-semibold transition-all shadow-xs active:scale-95 cursor-pointer ${
-          isMuted
-            ? 'bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 dark:bg-rose-500/15 dark:border-rose-500/40 dark:text-rose-300'
-            : 'bg-teal-50 border border-teal-200 text-teal-800 hover:bg-teal-100 dark:bg-teal-500/15 dark:border-teal-500/40 dark:text-teal-200'
-        }`}
-      >
-        {isMuted ? (
-          <>
-            <MicOff className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-            <span>Mic Muted (Click to Unmute)</span>
-          </>
-        ) : (
-          <>
-            <Mic className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-            <span>Microphone Live (Click to Mute)</span>
-          </>
-        )}
-      </button>
     </div>
   );
 };
